@@ -1,0 +1,7 @@
+CompileFlags:
+  CompilationDatabase: "build"
+  Remove:
+    - "-forward-unknown-to-host-compiler"
+    - "--options-file"
+    - "--generate-line-info"
+    - "--generate-code=arch=compute_52,code=[compute_52,sm_52]"
