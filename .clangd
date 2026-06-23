@@ -1,7 +1,6 @@
 CompileFlags:
-  CompilationDatabase: "build"
+  CompilationDatabase: "build/clangd"
   Remove:
     - "-forward-unknown-to-host-compiler"
     - "--options-file"
     - "--generate-line-info"
-    - "--generate-code=arch=compute_52,code=[compute_52,sm_52]"
