@@ -1,29 +1,51 @@
-cmake_minimum_required(VERSION 3.18)
+cmake_minimum_required(VERSION 3.22)
 
 project(CudaDeviceQuery LANGUAGES CXX CUDA)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CUDA_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 20)
 set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES native)
 endif()
 
+add_subdirectory(third_party/Catch2)
+add_executable(matrix_test tests/matrix_test.cpp)
+target_link_libraries(matrix_test PRIVATE Catch2::Catch2WithMain)
+
 add_executable(cu1 src/cu1.cu)
 add_executable(cu2 src/cu2.cu)
+add_executable(cu3 src/cu3.cu)
 
-execute_process(
+foreach(target matrix_test cu1 cu2 cu3)
+  target_include_directories(${target} PRIVATE "${CMAKE_SOURCE_DIR}/include")
+endforeach()
+
+set(CLANGD_COMPILE_COMMANDS_JSON
+  "${CMAKE_BINARY_DIR}/compile_commands.clangd.json")
+set(CLANGD_COMPILE_COMMANDS_DIR "${CMAKE_BINARY_DIR}/clangd")
+set(CLANGD_COMPILE_COMMANDS_LINK
+  "${CLANGD_COMPILE_COMMANDS_DIR}/compile_commands.json")
+
+add_custom_command(
+  OUTPUT "${CLANGD_COMPILE_COMMANDS_JSON}"
+  BYPRODUCTS "${CLANGD_COMPILE_COMMANDS_LINK}"
   COMMAND
-    "${CMAKE_SOURCE_DIR}/scripts/filter-compile-commands-clangd.sh"
-    "${CMAKE_BINARY_DIR}/compile_commands.json"
-    "${CMAKE_BINARY_DIR}/compile_commands.clangd.json"
-    "${CMAKE_BINARY_DIR}/clangd"
-  RESULT_VARIABLE CLANGD_COMPILE_COMMANDS_RESULT
+  "${CMAKE_SOURCE_DIR}/scripts/filter-compile-commands-clangd.sh"
+  "${CMAKE_BINARY_DIR}/compile_commands.json"
+  "${CLANGD_COMPILE_COMMANDS_JSON}"
+  "${CLANGD_COMPILE_COMMANDS_DIR}"
+  "${CMAKE_SOURCE_DIR}"
+  DEPENDS
+  "${CMAKE_BINARY_DIR}/compile_commands.json"
+  "${CMAKE_SOURCE_DIR}/scripts/filter-compile-commands-clangd.sh"
+  COMMENT "Generating clangd compile_commands.json"
+  VERBATIM
 )
-if(NOT CLANGD_COMPILE_COMMANDS_RESULT EQUAL 0)
-  message(FATAL_ERROR "Failed to generate clangd compile_commands.json")
-endif()
+
+add_custom_target(clangd_compile_commands ALL
+  DEPENDS "${CLANGD_COMPILE_COMMANDS_JSON}")
