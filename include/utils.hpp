@@ -41,7 +41,7 @@ class RandomGenerator {
 
   std::conditional_t<std::integral<T>,
                      std::uniform_int_distribution<T>,
-                     std::uniform_real_distribution<T> >
+                     std::uniform_real_distribution<T>>
       dist;
 };
 

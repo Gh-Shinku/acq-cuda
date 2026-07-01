@@ -2,6 +2,7 @@
 #define MATRIX_H
 
 #include <algorithm>
+#include <ostream>
 #include <stdexcept>
 #include <vector>
 #include "concepts.hpp"
@@ -92,6 +93,27 @@ class Matrix {
       }
     }
     return true;
+  }
+
+  friend std::ostream& operator<<(std::ostream& os, const Matrix& matrix) {
+    os << "[";
+    for (int i = 0; i < matrix.rows; ++i) {
+      if (i > 0) {
+        os << ",\n ";
+      }
+
+      os << "[";
+      for (int j = 0; j < matrix.cols; ++j) {
+        if (j > 0) {
+          os << ", ";
+        }
+        os << matrix(i, j);
+      }
+      os << "]";
+    }
+    os << "]";
+
+    return os;
   }
 };
 
