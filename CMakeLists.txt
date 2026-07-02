@@ -20,10 +20,16 @@ target_link_libraries(matrix_test PRIVATE Catch2::Catch2WithMain)
 add_executable(cu1 src/cu1.cu)
 add_executable(cu2 src/cu2.cu)
 add_executable(cu3 src/cu3.cu)
+add_executable(gemm_benchmark benchmarks/gemm_benchmark.cu)
 
-foreach(target matrix_test cu1 cu2 cu3)
+foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark)
   target_include_directories(${target} PRIVATE "${CMAKE_SOURCE_DIR}/include")
 endforeach()
+
+target_include_directories(gemm_benchmark PRIVATE
+  "${CMAKE_SOURCE_DIR}/third_party/cutlass/include")
+target_compile_options(gemm_benchmark PRIVATE
+  $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 
 set(CLANGD_COMPILE_COMMANDS_JSON
   "${CMAKE_BINARY_DIR}/compile_commands.clangd.json")
