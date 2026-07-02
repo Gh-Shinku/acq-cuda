@@ -26,23 +26,26 @@ def read_rows(path):
 def group_by_kernel(rows):
     grouped = defaultdict(list)
     for row in rows:
-        grouped[row["kernel"]].append(row)
+        grouped[row["impl"]].append(row)
     for values in grouped.values():
-        values.sort(key=lambda row: int(row["m"]))
+        values.sort(key=lambda row: int(row["size"]))
     return grouped
 
 
 def get_xy(rows, key):
-    x = [int(row["m"]) for row in rows]
+    x = [int(row["size"]) for row in rows]
     y = [float(row[key]) for row in rows]
     return x, y
 
 
-def plot_metric(ax, grouped, key, ylabel, title):
-    for kernel in sorted(grouped):
-        x, y = get_xy(grouped[kernel], key)
-        ax.plot(x, y, marker="o", linewidth=1.8, label=kernel)
-    ax.set_xlabel("Square matrix size")
+def plot_metric(ax, grouped, key, ylabel, title, log_y=False):
+    for impl in sorted(grouped):
+        x, y = get_xy(grouped[impl], key)
+        ax.plot(x, y, marker="o", linewidth=1.8, label=impl)
+    ax.set_xscale("log", base=2)
+    if log_y:
+        ax.set_yscale("log")
+    ax.set_xlabel("Matrix Size (M=N=K)")
     ax.set_ylabel(ylabel)
     ax.set_title(title)
     ax.grid(True, alpha=0.3)
@@ -62,33 +65,43 @@ def main():
     plot_metric(
         axes[0][0],
         grouped,
-        "time_ms",
-        "ms",
-        "Execution Time",
+        "tflops",
+        "TFLOPS",
+        "TFLOPS Performance vs Matrix Size",
     )
     plot_metric(
         axes[0][1],
         grouped,
-        "tflops",
-        "TFLOPS",
-        "FP32 Throughput",
+        "bandwidth_gbs",
+        "Bandwidth (GB/s)",
+        "Memory Bandwidth vs Matrix Size",
     )
     plot_metric(
         axes[1][0],
         grouped,
-        "effective_bandwidth_gbps",
-        "GB/s",
-        "Effective Memory Bandwidth",
+        "avg_time_ms",
+        "Time (ms)",
+        "Execution Time vs Matrix Size",
+        log_y=True,
     )
 
-    cutlass_rows = grouped.get("cutlass", [])
-    if cutlass_rows:
-        x, y = get_xy(cutlass_rows, "speedup_vs_naive")
-        axes[1][1].plot(x, y, marker="o", linewidth=1.8, color="tab:green")
-    axes[1][1].set_xlabel("Square matrix size")
-    axes[1][1].set_ylabel("x")
-    axes[1][1].set_title("CUTLASS Speedup vs Naive")
+    naive_rows = grouped.get("CUDA Naive", [])
+    if naive_rows:
+        x, y = get_xy(naive_rows, "speedup_vs_cutlass")
+        axes[1][1].plot(x, y, marker="o", linewidth=1.8, label="CUDA Naive")
+        axes[1][1].axhline(
+            y=1.0,
+            color="tab:gray",
+            linestyle="--",
+            linewidth=1.5,
+            label="CUTLASS Baseline",
+        )
+        axes[1][1].set_xscale("log", base=2)
+    axes[1][1].set_xlabel("Matrix Size (M=N=K)")
+    axes[1][1].set_ylabel("Speedup (x)")
+    axes[1][1].set_title("Speedup vs CUTLASS Baseline")
     axes[1][1].grid(True, alpha=0.3)
+    axes[1][1].legend()
 
     fig.suptitle("SGEMM Benchmark", fontsize=14)
     fig.savefig(args.output, dpi=160)

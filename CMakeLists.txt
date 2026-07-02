@@ -27,7 +27,9 @@ foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark)
 endforeach()
 
 target_include_directories(gemm_benchmark PRIVATE
-  "${CMAKE_SOURCE_DIR}/third_party/cutlass/include")
+  "${CMAKE_SOURCE_DIR}/third_party/cutlass/include"
+  "${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include"
+)
 target_compile_options(gemm_benchmark PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
 

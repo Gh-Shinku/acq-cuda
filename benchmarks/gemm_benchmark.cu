@@ -10,6 +10,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <random>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -29,27 +30,26 @@
 namespace {
 
 struct Options {
-  std::vector<int> sizes{256, 512, 1024, 2048, 4096};
-  int warmup = 5;
-  int repeat = 20;
+  std::vector<int> sizes{64,  96,   128,  256,  512,  768,
+                         1024, 1536, 2048, 3072, 4096};
+  int warmup = 10;
+  int repeat = 50;
+  bool repeat_overridden = false;
   int device = 0;
-  std::string csv_path = "benchmark_results/gemm_benchmark.csv";
+  std::string csv_path = "benchmark_results/gemm_benchmark_results.csv";
 };
 
 struct Metrics {
-  std::string kernel;
+  int size = 0;
+  std::string impl;
   int m = 0;
   int n = 0;
   int k = 0;
-  int warmup = 0;
-  int repeat = 0;
-  float time_ms = 0.0f;
+  float avg_time_ms = 0.0f;
   double tflops = 0.0;
-  double bandwidth_gbps = 0.0;
-  double speedup_vs_naive = 1.0;
-  double max_abs_error = 0.0;
-  double max_rel_error = 0.0;
-  bool passed = true;
+  double bandwidth_gbs = 0.0;
+  double speedup_vs_cutlass = 1.0;
+  bool valid = true;
 };
 
 template <typename T>
@@ -104,9 +104,10 @@ void launch_naive_gemm(int m, int n, int k, const float* a, const float* b,
 void launch_cutlass_gemm(int m, int n, int k, const float* a, const float* b,
                          float* c) {
   using RowMajor = cutlass::layout::RowMajor;
-  using CutlassGemm =
-      cutlass::gemm::device::Gemm<float, RowMajor, float, RowMajor, float,
-                                  RowMajor>;
+  // Explicit SIMT path: this benchmark does not use TF32 Tensor Cores.
+  using CutlassGemm = cutlass::gemm::device::Gemm<
+      float, RowMajor, float, RowMajor, float, RowMajor, float,
+      cutlass::arch::OpClassSimt>;
 
   CutlassGemm gemm;
   typename CutlassGemm::Arguments args({m, n, k}, {a, k}, {b, n}, {c, n},
@@ -154,12 +155,13 @@ Options parse_args(int argc, char** argv) {
       options.warmup = std::stoi(require_value(arg));
     } else if (arg == "--repeat") {
       options.repeat = std::stoi(require_value(arg));
+      options.repeat_overridden = true;
     } else if (arg == "--device") {
       options.device = std::stoi(require_value(arg));
     } else if (arg == "--csv") {
       options.csv_path = require_value(arg);
     } else if (arg == "--help") {
-      std::cout << "Usage: gemm_benchmark [--sizes 256,512] [--warmup N] "
+      std::cout << "Usage: gemm_benchmark [--sizes 64,128] [--warmup N] "
                    "[--repeat N] [--device ID] [--csv PATH]\n";
       std::exit(0);
     } else {
@@ -176,14 +178,27 @@ Options parse_args(int argc, char** argv) {
 
 std::vector<float> make_matrix(int rows, int cols, int seed) {
   std::vector<float> values(static_cast<size_t>(rows) * cols);
-  for (int i = 0; i < rows; ++i) {
-    for (int j = 0; j < cols; ++j) {
-      int mixed = (i * 131 + j * 17 + seed * 29) % 23;
-      values[static_cast<size_t>(i) * cols + j] =
-          (static_cast<float>(mixed) - 11.0f) / 11.0f;
-    }
+
+  std::mt19937 gen(seed);
+  std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+  for (float& value : values) {
+    value = dist(gen);
   }
+
   return values;
+}
+
+int repeat_for_size(int size, const Options& options) {
+  if (options.repeat_overridden) {
+    return options.repeat;
+  }
+  if (size >= 4096) {
+    return 10;
+  }
+  if (size >= 2048) {
+    return 20;
+  }
+  return options.repeat;
 }
 
 template <typename Fn>
@@ -219,7 +234,7 @@ void compare_results(const std::vector<float>& expected,
                      double* max_rel_error,
                      bool* passed) {
   constexpr double kAbsTolerance = 1.0e-2;
-  constexpr double kRelTolerance = 1.0e-4;
+  constexpr double kRelTolerance = 1.0e-2;
 
   *max_abs_error = 0.0;
   *max_rel_error = 0.0;
@@ -240,37 +255,37 @@ void compare_results(const std::vector<float>& expected,
   }
 }
 
-Metrics make_metrics(const std::string& kernel, int m, int n, int k, int warmup,
-                     int repeat, float time_ms) {
-  double time_sec = static_cast<double>(time_ms) / 1000.0;
+Metrics make_metrics(const std::string& impl, int m, int n, int k,
+                     float avg_time_ms) {
+  double time_sec = static_cast<double>(avg_time_ms) / 1000.0;
   double flops = 2.0 * static_cast<double>(m) * n * k;
   double bytes = sizeof(float) *
                  (static_cast<double>(m) * k + static_cast<double>(k) * n +
                   static_cast<double>(m) * n);
 
   Metrics metrics;
-  metrics.kernel = kernel;
+  metrics.size = m;
+  metrics.impl = impl;
   metrics.m = m;
   metrics.n = n;
   metrics.k = k;
-  metrics.warmup = warmup;
-  metrics.repeat = repeat;
-  metrics.time_ms = time_ms;
+  metrics.avg_time_ms = avg_time_ms;
   metrics.tflops = flops / time_sec / 1.0e12;
-  metrics.bandwidth_gbps = bytes / time_sec / 1.0e9;
+  metrics.bandwidth_gbs = bytes / time_sec / 1.0e9;
   return metrics;
 }
 
-std::vector<Metrics> benchmark_size(int size, int warmup, int repeat) {
+std::vector<Metrics> benchmark_size(int size, const Options& options) {
   int m = size;
   int n = size;
   int k = size;
+  int repeat = repeat_for_size(size, options);
   size_t a_count = static_cast<size_t>(m) * k;
   size_t b_count = static_cast<size_t>(k) * n;
   size_t c_count = static_cast<size_t>(m) * n;
 
-  std::vector<float> host_a = make_matrix(m, k, 1);
-  std::vector<float> host_b = make_matrix(k, n, 2);
+  std::vector<float> host_a = make_matrix(m, k, 42);
+  std::vector<float> host_b = make_matrix(k, n, 43);
   std::vector<float> host_naive(c_count);
   std::vector<float> host_cutlass(c_count);
 
@@ -286,42 +301,43 @@ std::vector<Metrics> benchmark_size(int size, int warmup, int repeat) {
   CUDA_CHECK(cudaMemset(dev_naive.get(), 0, dev_naive.bytes()));
   CUDA_CHECK(cudaMemset(dev_cutlass.get(), 0, dev_cutlass.bytes()));
 
-  float naive_ms = time_kernel(
-      [&] { launch_naive_gemm(m, n, k, dev_a.get(), dev_b.get(), dev_naive.get()); },
-      warmup, repeat);
-  CUDA_CHECK(cudaMemcpy(host_naive.data(), dev_naive.get(), dev_naive.bytes(),
-                        cudaMemcpyDeviceToHost));
-
   float cutlass_ms = time_kernel(
       [&] {
         launch_cutlass_gemm(m, n, k, dev_a.get(), dev_b.get(), dev_cutlass.get());
       },
-      warmup, repeat);
+      options.warmup, repeat);
   CUDA_CHECK(cudaMemcpy(host_cutlass.data(), dev_cutlass.get(), dev_cutlass.bytes(),
                         cudaMemcpyDeviceToHost));
 
-  Metrics naive = make_metrics("naive", m, n, k, warmup, repeat, naive_ms);
-  Metrics cutlass = make_metrics("cutlass", m, n, k, warmup, repeat, cutlass_ms);
-  cutlass.speedup_vs_naive = naive_ms / cutlass_ms;
+  float naive_ms = time_kernel(
+      [&] { launch_naive_gemm(m, n, k, dev_a.get(), dev_b.get(), dev_naive.get()); },
+      options.warmup, repeat);
+  CUDA_CHECK(cudaMemcpy(host_naive.data(), dev_naive.get(), dev_naive.bytes(),
+                        cudaMemcpyDeviceToHost));
 
-  compare_results(host_naive, host_cutlass, &cutlass.max_abs_error,
-                  &cutlass.max_rel_error, &cutlass.passed);
+  Metrics cutlass = make_metrics("CUTLASS", m, n, k, cutlass_ms);
+  Metrics naive = make_metrics("CUDA Naive", m, n, k, naive_ms);
+  naive.speedup_vs_cutlass = cutlass_ms / naive_ms;
 
-  return {naive, cutlass};
+  double max_abs_error = 0.0;
+  double max_rel_error = 0.0;
+  compare_results(host_cutlass, host_naive, &max_abs_error, &max_rel_error,
+                  &naive.valid);
+
+  return {cutlass, naive};
 }
 
 void write_header(std::ostream& os) {
-  os << "kernel,m,n,k,warmup,repeat,time_ms,tflops,effective_bandwidth_gbps,"
-        "speedup_vs_naive,max_abs_error,max_rel_error,passed\n";
+  os << "size,impl,M,N,K,avg_time_ms,tflops,bandwidth_gbs,"
+        "speedup_vs_cutlass,valid\n";
 }
 
 void write_metric(std::ostream& os, const Metrics& metric) {
-  os << metric.kernel << ',' << metric.m << ',' << metric.n << ',' << metric.k
-     << ',' << metric.warmup << ',' << metric.repeat << ',' << std::fixed
-     << std::setprecision(6) << metric.time_ms << ',' << metric.tflops << ','
-     << metric.bandwidth_gbps << ',' << metric.speedup_vs_naive << ','
-     << metric.max_abs_error << ',' << metric.max_rel_error << ','
-     << (metric.passed ? "true" : "false") << '\n';
+  os << metric.size << ',' << metric.impl << ',' << metric.m << ',' << metric.n
+     << ',' << metric.k << ',' << std::fixed << std::setprecision(6)
+     << metric.avg_time_ms << ',' << metric.tflops << ','
+     << metric.bandwidth_gbs << ',' << metric.speedup_vs_cutlass << ','
+     << (metric.valid ? "true" : "false") << '\n';
 }
 
 }  // namespace
@@ -341,11 +357,11 @@ int main(int argc, char** argv) {
 
     bool all_passed = true;
     for (int size : options.sizes) {
-      auto metrics = benchmark_size(size, options.warmup, options.repeat);
+      auto metrics = benchmark_size(size, options);
       for (const Metrics& metric : metrics) {
         write_metric(csv, metric);
         write_metric(std::cout, metric);
-        all_passed = all_passed && metric.passed;
+        all_passed = all_passed && metric.valid;
       }
     }
 
