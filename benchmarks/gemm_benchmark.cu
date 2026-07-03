@@ -1,8 +1,7 @@
-#include <cuda_runtime.h>
+#include "gemm/check.hpp"
+#include "gemm/sgemm.hpp"
 
-#include <cutlass/cutlass.h>
-#include <cutlass/gemm/device/gemm.h>
-#include <cutlass/layout/matrix.h>
+#include <cuda_runtime.h>
 
 #include <algorithm>
 #include <cmath>
@@ -16,22 +15,12 @@
 #include <string>
 #include <vector>
 
-#define CUDA_CHECK(expr)                                                       \
-  do {                                                                         \
-    cudaError_t status = (expr);                                               \
-    if (status != cudaSuccess) {                                               \
-      std::ostringstream oss;                                                  \
-      oss << "CUDA error at " << __FILE__ << ":" << __LINE__ << ": "          \
-          << cudaGetErrorString(status);                                       \
-      throw std::runtime_error(oss.str());                                     \
-    }                                                                          \
-  } while (0)
-
 namespace {
 
 struct Options {
   std::vector<int> sizes{64,  96,   128,  256,  512,  768,
                          1024, 1536, 2048, 3072, 4096};
+  std::vector<std::string> impl_filter;
   int warmup = 10;
   int repeat = 50;
   bool repeat_overridden = false;
@@ -56,7 +45,7 @@ template <typename T>
 class DeviceBuffer {
  public:
   explicit DeviceBuffer(size_t count) : count_(count) {
-    CUDA_CHECK(cudaMalloc(&ptr_, count_ * sizeof(T)));
+    GEMM_CUDA_CHECK(cudaMalloc(&ptr_, count_ * sizeof(T)));
   }
 
   ~DeviceBuffer() {
@@ -76,55 +65,21 @@ class DeviceBuffer {
   size_t count_ = 0;
 };
 
-__global__ void sgemm_naive_kernel(int m, int n, int k, const float* a,
-                                   const float* b, float* c) {
-  int row = blockIdx.y * blockDim.y + threadIdx.y;
-  int col = blockIdx.x * blockDim.x + threadIdx.x;
-
-  if (row >= m || col >= n) {
-    return;
+std::vector<std::string> parse_csv_strings(const std::string& value) {
+  std::vector<std::string> items;
+  std::stringstream ss(value);
+  std::string item;
+  while (std::getline(ss, item, ',')) {
+    if (!item.empty()) {
+      items.push_back(item);
+    }
   }
-
-  float sum = 0.0f;
-  for (int inner = 0; inner < k; ++inner) {
-    sum += a[row * k + inner] * b[inner * n + col];
-  }
-
-  c[row * n + col] = sum;
-}
-
-void launch_naive_gemm(int m, int n, int k, const float* a, const float* b,
-                       float* c) {
-  dim3 block(16, 16);
-  dim3 grid((n + block.x - 1) / block.x, (m + block.y - 1) / block.y);
-  sgemm_naive_kernel<<<grid, block>>>(m, n, k, a, b, c);
-  CUDA_CHECK(cudaGetLastError());
-}
-
-void launch_cutlass_gemm(int m, int n, int k, const float* a, const float* b,
-                         float* c) {
-  using RowMajor = cutlass::layout::RowMajor;
-  // Explicit SIMT path: this benchmark does not use TF32 Tensor Cores.
-  using CutlassGemm = cutlass::gemm::device::Gemm<
-      float, RowMajor, float, RowMajor, float, RowMajor, float,
-      cutlass::arch::OpClassSimt>;
-
-  CutlassGemm gemm;
-  typename CutlassGemm::Arguments args({m, n, k}, {a, k}, {b, n}, {c, n},
-                                       {c, n}, {1.0f, 0.0f});
-
-  cutlass::Status status = gemm(args);
-  if (status != cutlass::Status::kSuccess) {
-    throw std::runtime_error("CUTLASS GEMM launch failed");
-  }
-  CUDA_CHECK(cudaGetLastError());
+  return items;
 }
 
 std::vector<int> parse_sizes(const std::string& value) {
   std::vector<int> sizes;
-  std::stringstream ss(value);
-  std::string item;
-  while (std::getline(ss, item, ',')) {
+  for (const std::string& item : parse_csv_strings(value)) {
     int size = std::stoi(item);
     if (size <= 0) {
       throw std::invalid_argument("matrix sizes must be positive");
@@ -151,6 +106,11 @@ Options parse_args(int argc, char** argv) {
 
     if (arg == "--sizes") {
       options.sizes = parse_sizes(require_value(arg));
+    } else if (arg == "--impl") {
+      options.impl_filter = parse_csv_strings(require_value(arg));
+      if (options.impl_filter.empty()) {
+        throw std::invalid_argument("--impl must contain at least one name");
+      }
     } else if (arg == "--warmup") {
       options.warmup = std::stoi(require_value(arg));
     } else if (arg == "--repeat") {
@@ -161,8 +121,9 @@ Options parse_args(int argc, char** argv) {
     } else if (arg == "--csv") {
       options.csv_path = require_value(arg);
     } else if (arg == "--help") {
-      std::cout << "Usage: gemm_benchmark [--sizes 64,128] [--warmup N] "
-                   "[--repeat N] [--device ID] [--csv PATH]\n";
+      std::cout << "Usage: gemm_benchmark [--sizes 64,128] "
+                   "[--impl CUTLASS,CUDA Naive] [--warmup N] [--repeat N] "
+                   "[--device ID] [--csv PATH]\n";
       std::exit(0);
     } else {
       throw std::invalid_argument("unknown argument: " + arg);
@@ -174,6 +135,40 @@ Options parse_args(int argc, char** argv) {
   }
 
   return options;
+}
+
+bool contains_impl(const std::vector<std::string>& impl_filter,
+                   const char* name) {
+  return impl_filter.empty() ||
+         std::find(impl_filter.begin(), impl_filter.end(), name) !=
+             impl_filter.end();
+}
+
+std::vector<gemm::SgemmImplementation> selected_implementations(
+    const Options& options) {
+  std::vector<gemm::SgemmImplementation> selected;
+  for (const gemm::SgemmImplementation& impl :
+       gemm::get_sgemm_implementations()) {
+    if (contains_impl(options.impl_filter, impl.name)) {
+      selected.push_back(impl);
+    }
+  }
+
+  if (selected.empty()) {
+    throw std::invalid_argument("no GEMM implementations selected");
+  }
+
+  auto baseline =
+      std::find_if(selected.begin(), selected.end(),
+                   [](const gemm::SgemmImplementation& impl) {
+                     return impl.is_cutlass_baseline;
+                   });
+  if (baseline == selected.end()) {
+    throw std::invalid_argument("selected implementations must include CUTLASS");
+  }
+  std::rotate(selected.begin(), baseline, baseline + 1);
+
+  return selected;
 }
 
 std::vector<float> make_matrix(int rows, int cols, int seed) {
@@ -206,51 +201,43 @@ float time_kernel(Fn&& fn, int warmup, int repeat) {
   for (int i = 0; i < warmup; ++i) {
     fn();
   }
-  CUDA_CHECK(cudaDeviceSynchronize());
+  GEMM_CUDA_CHECK(cudaDeviceSynchronize());
 
   cudaEvent_t start;
   cudaEvent_t stop;
-  CUDA_CHECK(cudaEventCreate(&start));
-  CUDA_CHECK(cudaEventCreate(&stop));
+  GEMM_CUDA_CHECK(cudaEventCreate(&start));
+  GEMM_CUDA_CHECK(cudaEventCreate(&stop));
 
-  CUDA_CHECK(cudaEventRecord(start));
+  GEMM_CUDA_CHECK(cudaEventRecord(start));
   for (int i = 0; i < repeat; ++i) {
     fn();
   }
-  CUDA_CHECK(cudaEventRecord(stop));
-  CUDA_CHECK(cudaEventSynchronize(stop));
+  GEMM_CUDA_CHECK(cudaEventRecord(stop));
+  GEMM_CUDA_CHECK(cudaEventSynchronize(stop));
 
   float elapsed_ms = 0.0f;
-  CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms, start, stop));
-  CUDA_CHECK(cudaEventDestroy(start));
-  CUDA_CHECK(cudaEventDestroy(stop));
+  GEMM_CUDA_CHECK(cudaEventElapsedTime(&elapsed_ms, start, stop));
+  GEMM_CUDA_CHECK(cudaEventDestroy(start));
+  GEMM_CUDA_CHECK(cudaEventDestroy(stop));
 
   return elapsed_ms / static_cast<float>(repeat);
 }
 
 void compare_results(const std::vector<float>& expected,
-                     const std::vector<float>& actual,
-                     double* max_abs_error,
-                     double* max_rel_error,
-                     bool* passed) {
+                     const std::vector<float>& actual, bool* passed) {
   constexpr double kAbsTolerance = 1.0e-2;
   constexpr double kRelTolerance = 1.0e-2;
 
-  *max_abs_error = 0.0;
-  *max_rel_error = 0.0;
   *passed = true;
-
   for (size_t i = 0; i < expected.size(); ++i) {
     double abs_error =
         std::abs(static_cast<double>(expected[i]) - static_cast<double>(actual[i]));
     double denom = std::max(1.0, std::abs(static_cast<double>(expected[i])));
     double rel_error = abs_error / denom;
 
-    *max_abs_error = std::max(*max_abs_error, abs_error);
-    *max_rel_error = std::max(*max_rel_error, rel_error);
-
     if (abs_error > kAbsTolerance && rel_error > kRelTolerance) {
       *passed = false;
+      return;
     }
   }
 }
@@ -275,56 +262,69 @@ Metrics make_metrics(const std::string& impl, int m, int n, int k,
   return metrics;
 }
 
-std::vector<Metrics> benchmark_size(int size, const Options& options) {
-  int m = size;
-  int n = size;
-  int k = size;
+std::vector<Metrics> benchmark_size(
+    int size, const Options& options,
+    const std::vector<gemm::SgemmImplementation>& implementations) {
+  gemm::SgemmProblem problem{size, size, size, 1.0f, 0.0f};
   int repeat = repeat_for_size(size, options);
-  size_t a_count = static_cast<size_t>(m) * k;
-  size_t b_count = static_cast<size_t>(k) * n;
-  size_t c_count = static_cast<size_t>(m) * n;
+  size_t a_count = static_cast<size_t>(problem.m) * problem.k;
+  size_t b_count = static_cast<size_t>(problem.k) * problem.n;
+  size_t c_count = static_cast<size_t>(problem.m) * problem.n;
 
-  std::vector<float> host_a = make_matrix(m, k, 42);
-  std::vector<float> host_b = make_matrix(k, n, 43);
-  std::vector<float> host_naive(c_count);
-  std::vector<float> host_cutlass(c_count);
+  std::vector<float> host_a = make_matrix(problem.m, problem.k, 42);
+  std::vector<float> host_b = make_matrix(problem.k, problem.n, 43);
+  std::vector<float> host_c(c_count, 0.0f);
+  std::vector<float> host_baseline(c_count);
 
   DeviceBuffer<float> dev_a(a_count);
   DeviceBuffer<float> dev_b(b_count);
-  DeviceBuffer<float> dev_naive(c_count);
-  DeviceBuffer<float> dev_cutlass(c_count);
+  DeviceBuffer<float> dev_c(c_count);
+  DeviceBuffer<float> dev_d(c_count);
 
-  CUDA_CHECK(cudaMemcpy(dev_a.get(), host_a.data(), dev_a.bytes(),
-                        cudaMemcpyHostToDevice));
-  CUDA_CHECK(cudaMemcpy(dev_b.get(), host_b.data(), dev_b.bytes(),
-                        cudaMemcpyHostToDevice));
-  CUDA_CHECK(cudaMemset(dev_naive.get(), 0, dev_naive.bytes()));
-  CUDA_CHECK(cudaMemset(dev_cutlass.get(), 0, dev_cutlass.bytes()));
+  GEMM_CUDA_CHECK(
+      cudaMemcpy(dev_a.get(), host_a.data(), dev_a.bytes(), cudaMemcpyHostToDevice));
+  GEMM_CUDA_CHECK(
+      cudaMemcpy(dev_b.get(), host_b.data(), dev_b.bytes(), cudaMemcpyHostToDevice));
+  GEMM_CUDA_CHECK(
+      cudaMemcpy(dev_c.get(), host_c.data(), dev_c.bytes(), cudaMemcpyHostToDevice));
 
-  float cutlass_ms = time_kernel(
-      [&] {
-        launch_cutlass_gemm(m, n, k, dev_a.get(), dev_b.get(), dev_cutlass.get());
-      },
-      options.warmup, repeat);
-  CUDA_CHECK(cudaMemcpy(host_cutlass.data(), dev_cutlass.get(), dev_cutlass.bytes(),
-                        cudaMemcpyDeviceToHost));
+  std::vector<Metrics> metrics;
+  float baseline_ms = 0.0f;
 
-  float naive_ms = time_kernel(
-      [&] { launch_naive_gemm(m, n, k, dev_a.get(), dev_b.get(), dev_naive.get()); },
-      options.warmup, repeat);
-  CUDA_CHECK(cudaMemcpy(host_naive.data(), dev_naive.get(), dev_naive.bytes(),
-                        cudaMemcpyDeviceToHost));
+  for (const gemm::SgemmImplementation& impl : implementations) {
+    GEMM_CUDA_CHECK(cudaMemset(dev_d.get(), 0, dev_d.bytes()));
 
-  Metrics cutlass = make_metrics("CUTLASS", m, n, k, cutlass_ms);
-  Metrics naive = make_metrics("CUDA Naive", m, n, k, naive_ms);
-  naive.speedup_vs_cutlass = cutlass_ms / naive_ms;
+    float avg_ms = time_kernel(
+        [&] {
+          impl.launcher(problem, dev_a.get(), dev_b.get(), dev_c.get(),
+                        dev_d.get(), nullptr);
+        },
+        options.warmup, repeat);
 
-  double max_abs_error = 0.0;
-  double max_rel_error = 0.0;
-  compare_results(host_cutlass, host_naive, &max_abs_error, &max_rel_error,
-                  &naive.valid);
+    std::vector<float> host_output(c_count);
+    GEMM_CUDA_CHECK(cudaMemcpy(host_output.data(), dev_d.get(), dev_d.bytes(),
+                               cudaMemcpyDeviceToHost));
 
-  return {cutlass, naive};
+    Metrics impl_metrics =
+        make_metrics(impl.name, problem.m, problem.n, problem.k, avg_ms);
+
+    if (impl.is_cutlass_baseline) {
+      baseline_ms = avg_ms;
+      host_baseline = std::move(host_output);
+      impl_metrics.speedup_vs_cutlass = 1.0;
+      impl_metrics.valid = true;
+    } else {
+      if (baseline_ms == 0.0f) {
+        throw std::runtime_error("CUTLASS baseline must run before other kernels");
+      }
+      impl_metrics.speedup_vs_cutlass = baseline_ms / avg_ms;
+      compare_results(host_baseline, host_output, &impl_metrics.valid);
+    }
+
+    metrics.push_back(impl_metrics);
+  }
+
+  return metrics;
 }
 
 void write_header(std::ostream& os) {
@@ -345,7 +345,10 @@ void write_metric(std::ostream& os, const Metrics& metric) {
 int main(int argc, char** argv) {
   try {
     Options options = parse_args(argc, argv);
-    CUDA_CHECK(cudaSetDevice(options.device));
+    GEMM_CUDA_CHECK(cudaSetDevice(options.device));
+
+    std::vector<gemm::SgemmImplementation> implementations =
+        selected_implementations(options);
 
     std::ofstream csv(options.csv_path);
     if (!csv) {
@@ -357,7 +360,7 @@ int main(int argc, char** argv) {
 
     bool all_passed = true;
     for (int size : options.sizes) {
-      auto metrics = benchmark_size(size, options);
+      auto metrics = benchmark_size(size, options, implementations);
       for (const Metrics& metric : metrics) {
         write_metric(csv, metric);
         write_metric(std::cout, metric);

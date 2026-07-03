@@ -6,3 +6,4 @@ CompileFlags:
     - "-forward-unknown-to-host-compiler"
     - "--options-file"
     - "--generate-line-info"
+    - "--expt-relaxed-constexpr"

@@ -21,17 +21,27 @@ add_executable(cu1 src/cu1.cu)
 add_executable(cu2 src/cu2.cu)
 add_executable(cu3 src/cu3.cu)
 add_executable(gemm_benchmark benchmarks/gemm_benchmark.cu)
+add_library(gemm_kernels STATIC
+  src/gemm/registry.cu
+  src/gemm/sgemm_cutlass.cu
+  src/gemm/sgemm_naive.cu
+)
 
 foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark)
   target_include_directories(${target} PRIVATE "${CMAKE_SOURCE_DIR}/include")
 endforeach()
 
-target_include_directories(gemm_benchmark PRIVATE
+target_include_directories(gemm_kernels PUBLIC
+  "${CMAKE_SOURCE_DIR}/include")
+target_include_directories(gemm_kernels PRIVATE
   "${CMAKE_SOURCE_DIR}/third_party/cutlass/include"
   "${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include"
 )
-target_compile_options(gemm_benchmark PRIVATE
+target_compile_options(gemm_kernels PRIVATE
   $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
+
+target_link_libraries(cu3 PRIVATE gemm_kernels)
+target_link_libraries(gemm_benchmark PRIVATE gemm_kernels)
 
 set(CLANGD_COMPILE_COMMANDS_JSON
   "${CMAKE_BINARY_DIR}/compile_commands.clangd.json")
@@ -48,6 +58,7 @@ add_custom_command(
   "${CLANGD_COMPILE_COMMANDS_JSON}"
   "${CLANGD_COMPILE_COMMANDS_DIR}"
   "${CMAKE_SOURCE_DIR}"
+  "${CMAKE_CUDA_TOOLKIT_INCLUDE_DIRECTORIES}"
   DEPENDS
   "${CMAKE_BINARY_DIR}/compile_commands.json"
   "${CMAKE_SOURCE_DIR}/scripts/filter-compile-commands-clangd.sh"
