@@ -30,7 +30,7 @@ __global__ void sgemm_naive_kernel(SgemmProblem problem, const float* a,
 void launch_sgemm_naive(const SgemmProblem& problem, const float* a,
                         const float* b, const float* c, float* d,
                         cudaStream_t stream) {
-  dim3 block(16, 16);
+  dim3 block(32, 32);
   dim3 grid((problem.n + block.x - 1) / block.x,
             (problem.m + block.y - 1) / block.y);
 

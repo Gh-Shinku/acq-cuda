@@ -122,7 +122,8 @@ Options parse_args(int argc, char** argv) {
       options.csv_path = require_value(arg);
     } else if (arg == "--help") {
       std::cout << "Usage: gemm_benchmark [--sizes 64,128] "
-                   "[--impl CUTLASS,CUDA Naive] [--warmup N] [--repeat N] "
+                   "[--impl CUTLASS,CUDA Naive,CUDA Tiling] [--warmup N] "
+                   "[--repeat N] "
                    "[--device ID] [--csv PATH]\n";
       std::exit(0);
     } else {
