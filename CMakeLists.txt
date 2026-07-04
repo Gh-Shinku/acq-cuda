@@ -25,6 +25,7 @@ add_library(gemm_kernels STATIC
   src/gemm/registry.cu
   src/gemm/sgemm_cutlass.cu
   src/gemm/sgemm_naive.cu
+  src/gemm/sgemm_tiling.cu
 )
 
 foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark)

@@ -45,4 +45,25 @@ class RandomGenerator {
       dist;
 };
 
+template <Numeric T>
+class CudaMemory {
+ public:
+  explicit CudaMemory(size_t len) : len_(len), size_(sizeof(T) * len) {
+    cudaMalloc(&mem_, size_);
+  }
+
+  ~CudaMemory() { cudaFree(mem_); }
+
+  CudaMemory(const CudaMemory&) = delete;
+  CudaMemory& operator=(const CudaMemory&) = delete;
+
+  T* ptr() const { return mem_; }
+  size_t getSize() const { return size_; }
+
+ private:
+  T* mem_ = nullptr;
+  size_t len_ = 0;
+  size_t size_ = 0;
+};
+
 #endif /* UTILS_H */

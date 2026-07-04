@@ -15,8 +15,11 @@ struct SgemmProblem {
   float beta = 0.0f;
 };
 
-using SgemmLauncher = void (*)(const SgemmProblem& problem, const float* a,
-                               const float* b, const float* c, float* d,
+using SgemmLauncher = void (*)(const SgemmProblem& problem,
+                               const float* a,
+                               const float* b,
+                               const float* c,
+                               float* d,
                                cudaStream_t stream);
 
 struct SgemmImplementation {
@@ -25,12 +28,25 @@ struct SgemmImplementation {
   bool is_cutlass_baseline;
 };
 
-void launch_sgemm_naive(const SgemmProblem& problem, const float* a,
-                        const float* b, const float* c, float* d,
+void launch_sgemm_naive(const SgemmProblem& problem,
+                        const float* a,
+                        const float* b,
+                        const float* c,
+                        float* d,
                         cudaStream_t stream);
 
-void launch_sgemm_cutlass(const SgemmProblem& problem, const float* a,
-                          const float* b, const float* c, float* d,
+void launch_sgemm_tiling(const SgemmProblem& problem,
+                         const float* a,
+                         const float* b,
+                         const float* c,
+                         float* d,
+                         cudaStream_t stream);
+
+void launch_sgemm_cutlass(const SgemmProblem& problem,
+                          const float* a,
+                          const float* b,
+                          const float* c,
+                          float* d,
                           cudaStream_t stream);
 
 const std::vector<SgemmImplementation>& get_sgemm_implementations();

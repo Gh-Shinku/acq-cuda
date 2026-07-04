@@ -10,8 +10,8 @@
 #include <stdexcept>
 
 void cpu_naive_gemm(int num_rows_a, int num_cols_a, int num_cols_b, float alpha,
-                    const float* matrix_a, const float* matrix_b,
-                    const float* matrix_c, float beta, float* output_matrix) {
+                    const float *matrix_a, const float *matrix_b,
+                    const float *matrix_c, float beta, float *output_matrix) {
   for (int i = 0; i < num_rows_a; ++i) {
     for (int j = 0; j < num_cols_b; ++j) {
       const int out_idx = i * num_cols_b + j;
@@ -24,28 +24,7 @@ void cpu_naive_gemm(int num_rows_a, int num_cols_a, int num_cols_b, float alpha,
   }
 }
 
-template <Numeric T>
-class CudaMemory {
- public:
-  explicit CudaMemory(size_t len) : len_(len), size_(sizeof(T) * len) {
-    cudaMalloc(&mem_, size_);
-  }
-
-  ~CudaMemory() { cudaFree(mem_); }
-
-  CudaMemory(const CudaMemory&) = delete;
-  CudaMemory& operator=(const CudaMemory&) = delete;
-
-  T* ptr() const { return mem_; }
-  size_t getSize() const { return size_; }
-
- private:
-  T* mem_ = nullptr;
-  size_t len_ = 0;
-  size_t size_ = 0;
-};
-
-bool matrix_near(const Matrix<float>& lhs, const Matrix<float>& rhs,
+bool matrix_near(const Matrix<float> &lhs, const Matrix<float> &rhs,
                  float atol = 1.0e-4f, float rtol = 1.0e-4f) {
   if (lhs.row() != rhs.row() || lhs.col() != rhs.col()) {
     return false;
@@ -108,7 +87,7 @@ int main() {
               << (matrix_near(cuda_out, cpu_out) ? "EQ" : "NEQ") << "\n";
 
     return 0;
-  } catch (const std::exception& e) {
+  } catch (const std::exception &e) {
     std::cerr << "cu3: " << e.what() << "\n";
     return 1;
   }
