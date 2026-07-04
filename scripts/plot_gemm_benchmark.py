@@ -52,6 +52,28 @@ def plot_metric(ax, grouped, key, ylabel, title, log_y=False):
     ax.legend()
 
 
+def plot_speedup(ax, grouped):
+    for impl in sorted(grouped):
+        if impl == "CUTLASS":
+            continue
+        x, y = get_xy(grouped[impl], "speedup_vs_cutlass")
+        ax.plot(x, y, marker="o", linewidth=1.8, label=impl)
+
+    ax.axhline(
+        y=1.0,
+        color="tab:gray",
+        linestyle="--",
+        linewidth=1.5,
+        label="CUTLASS Baseline",
+    )
+    ax.set_xscale("log", base=2)
+    ax.set_xlabel("Matrix Size (M=N=K)")
+    ax.set_ylabel("Speedup (x)")
+    ax.set_title("Speedup vs CUTLASS Baseline")
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--csv", required=True)
@@ -85,23 +107,7 @@ def main():
         log_y=True,
     )
 
-    naive_rows = grouped.get("CUDA Naive", [])
-    if naive_rows:
-        x, y = get_xy(naive_rows, "speedup_vs_cutlass")
-        axes[1][1].plot(x, y, marker="o", linewidth=1.8, label="CUDA Naive")
-        axes[1][1].axhline(
-            y=1.0,
-            color="tab:gray",
-            linestyle="--",
-            linewidth=1.5,
-            label="CUTLASS Baseline",
-        )
-        axes[1][1].set_xscale("log", base=2)
-    axes[1][1].set_xlabel("Matrix Size (M=N=K)")
-    axes[1][1].set_ylabel("Speedup (x)")
-    axes[1][1].set_title("Speedup vs CUTLASS Baseline")
-    axes[1][1].grid(True, alpha=0.3)
-    axes[1][1].legend()
+    plot_speedup(axes[1][1], grouped)
 
     fig.suptitle("SGEMM Benchmark", fontsize=14)
     fig.savefig(args.output, dpi=160)
