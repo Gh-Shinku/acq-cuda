@@ -2,3 +2,4 @@
 build/
 benchmark_results/
 **/__pycache__
+ncu_reports/

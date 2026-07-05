@@ -1,18 +1,8 @@
 import argparse
 import csv
 import sys
+import matplotlib.pyplot as plt
 from collections import defaultdict
-
-try:
-    import matplotlib.pyplot as plt
-except ModuleNotFoundError:
-    print(
-        "matplotlib is required. Install it with:\n"
-        "  /home/zhaoyutong/miniconda3/bin/conda install -n base matplotlib\n"
-        "or run with PYTHON=/path/to/python that already has matplotlib.",
-        file=sys.stderr,
-    )
-    raise
 
 
 def read_rows(path):
