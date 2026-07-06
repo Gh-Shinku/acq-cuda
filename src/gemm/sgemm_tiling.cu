@@ -5,7 +5,7 @@
 
 namespace gemm {
 
-constexpr int block_size = 32;
+constexpr int block_size = 16;
 constexpr int tile_size = block_size;
 
 namespace {

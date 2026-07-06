@@ -4,10 +4,13 @@
 #include <cuda_runtime.h>
 
 namespace gemm {
+
+constexpr int block_size = 16;
+
 namespace {
 
-__global__ void sgemm_naive_kernel(SgemmProblem problem, const float* a,
-                                   const float* b, const float* c, float* d) {
+__global__ void sgemm_naive_kernel(SgemmProblem problem, const float *a,
+                                   const float *b, const float *c, float *d) {
   int row = blockIdx.y * blockDim.y + threadIdx.y;
   int col = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -25,12 +28,12 @@ __global__ void sgemm_naive_kernel(SgemmProblem problem, const float* a,
   d[idx] = problem.alpha * sum + problem.beta * previous;
 }
 
-}  // namespace
+} // namespace
 
-void launch_sgemm_naive(const SgemmProblem& problem, const float* a,
-                        const float* b, const float* c, float* d,
+void launch_sgemm_naive(const SgemmProblem &problem, const float *a,
+                        const float *b, const float *c, float *d,
                         cudaStream_t stream) {
-  dim3 block(32, 32);
+  dim3 block(block_size, block_size);
   dim3 grid((problem.n + block.x - 1) / block.x,
             (problem.m + block.y - 1) / block.y);
 
@@ -38,4 +41,4 @@ void launch_sgemm_naive(const SgemmProblem& problem, const float* a,
   GEMM_CUDA_CHECK(cudaGetLastError());
 }
 
-}  // namespace gemm
+} // namespace gemm
