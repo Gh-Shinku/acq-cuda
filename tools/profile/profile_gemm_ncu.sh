@@ -15,6 +15,7 @@ ncu_bin="ncu"
 ncu_set="full"
 output=""
 cudacxx="/home/zhaoyutong/miniconda3/envs/cuda_ws/bin/nvcc"
+skip_correctness="false"
 
 usage() {
   cat <<USAGE
@@ -34,6 +35,7 @@ Options:
   --output PATH      ncu output path without .ncu-rep suffix
   --build-dir PATH   CMake build directory (default: ${repo_dir}/build)
   --cudacxx PATH     nvcc path for first-time CMake configure
+  --skip-correctness Run ncu without the quick correctness gate
   --help             Show this help
 USAGE
 }
@@ -137,6 +139,10 @@ while [[ $# -gt 0 ]]; do
       cudacxx="$(require_value "$1" "${2:-}")"
       shift 2
       ;;
+    --skip-correctness)
+      skip_correctness="true"
+      shift
+      ;;
     --help)
       usage
       exit 0
@@ -170,6 +176,14 @@ mkdir -p "$(dirname "${output}")"
 if [[ ! -f "${build_dir}/CMakeCache.txt" ]]; then
   cmake -S "${repo_dir}" -B "${build_dir}" -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_CUDA_COMPILER="${cudacxx}"
+fi
+
+if [[ "${skip_correctness}" == "false" ]]; then
+  "${repo_dir}/tools/scripts/run_gemm_correctness.sh" \
+    --build-dir "${build_dir}" \
+    --device "${device}" \
+    --quick \
+    --cudacxx "${cudacxx}"
 fi
 
 cmake --build "${build_dir}" --target gemm_profile

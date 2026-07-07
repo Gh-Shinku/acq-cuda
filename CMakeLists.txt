@@ -14,6 +14,7 @@ if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
 endif()
 
 add_subdirectory(third_party/Catch2)
+enable_testing()
 add_executable(matrix_test tests/matrix_test.cpp)
 target_link_libraries(matrix_test PRIVATE Catch2::Catch2WithMain)
 
@@ -22,6 +23,7 @@ add_executable(cu2 src/cu2.cu)
 add_executable(cu3 src/cu3.cu)
 add_executable(gemm_benchmark benchmarks/gemm_benchmark.cu)
 add_executable(gemm_profile tools/profile/gemm_profile.cu)
+add_executable(gemm_correctness_test tests/gemm_correctness_test.cu)
 add_library(gemm_kernels STATIC
   src/gemm/registry.cu
   src/gemm/sgemm_cutlass.cu
@@ -29,7 +31,8 @@ add_library(gemm_kernels STATIC
   src/gemm/sgemm_tiling.cu
 )
 
-foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark gemm_profile)
+foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark gemm_profile
+               gemm_correctness_test)
   target_include_directories(${target} PRIVATE "${CMAKE_SOURCE_DIR}/include")
 endforeach()
 
@@ -45,6 +48,10 @@ target_compile_options(gemm_kernels PRIVATE
 target_link_libraries(cu3 PRIVATE gemm_kernels)
 target_link_libraries(gemm_benchmark PRIVATE gemm_kernels)
 target_link_libraries(gemm_profile PRIVATE gemm_kernels)
+target_link_libraries(gemm_correctness_test PRIVATE gemm_kernels)
+
+add_test(NAME gemm_correctness
+  COMMAND gemm_correctness_test --quick)
 
 set(CLANGD_COMPILE_COMMANDS_JSON
   "${CMAKE_BINARY_DIR}/compile_commands.clangd.json")
