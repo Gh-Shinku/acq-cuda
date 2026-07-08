@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.22)
 
 project(CudaDeviceQuery LANGUAGES CXX CUDA)
 
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING
+    "Build type for single-config generators" FORCE)
+endif()
+
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 set(CMAKE_CXX_STANDARD 20)
@@ -12,6 +17,10 @@ set(CMAKE_CUDA_STANDARD_REQUIRED ON)
 if(NOT DEFINED CMAKE_CUDA_ARCHITECTURES)
   set(CMAKE_CUDA_ARCHITECTURES native)
 endif()
+
+option(ACQ_CUDA_LINE_INFO
+  "Emit CUDA source line information for Nsight Compute without disabling optimization"
+  ON)
 
 add_subdirectory(third_party/Catch2)
 enable_testing()
@@ -28,11 +37,11 @@ add_library(gemm_kernels STATIC
   src/gemm/registry.cu
   src/gemm/sgemm_cutlass.cu
   src/gemm/sgemm_naive.cu
-  src/gemm/sgemm_tiling.cu
+  src/gemm/sgemm_smem.cu
 )
 
 foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark gemm_profile
-               gemm_correctness_test)
+  gemm_correctness_test)
   target_include_directories(${target} PRIVATE "${CMAKE_SOURCE_DIR}/include")
 endforeach()
 
@@ -43,7 +52,10 @@ target_include_directories(gemm_kernels PRIVATE
   "${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include"
 )
 target_compile_options(gemm_kernels PRIVATE
-  $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>)
+  $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
+  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Release>>:-O3>
+  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:RelWithDebInfo>>:-O2>
+  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<BOOL:${ACQ_CUDA_LINE_INFO}>>:--generate-line-info>)
 
 target_link_libraries(cu3 PRIVATE gemm_kernels)
 target_link_libraries(gemm_benchmark PRIVATE gemm_kernels)
