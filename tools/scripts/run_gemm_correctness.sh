@@ -5,6 +5,7 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 build_dir="${repo_dir}/build"
 mode="quick"
 device="0"
+cublas_math="fp32"
 cudacxx="/home/zhaoyutong/miniconda3/envs/cuda_ws/bin/nvcc"
 
 usage() {
@@ -16,6 +17,7 @@ Options:
   --device ID       CUDA device id (default: 0)
   --quick           Run quick correctness cases (default)
   --full            Run full correctness cases
+  --cublas-math M   cuBLAS math mode: fp32 or default (default: fp32)
   --cudacxx PATH    nvcc path for first-time CMake configure
   --help            Show this help
 USAGE
@@ -56,6 +58,14 @@ while [[ $# -gt 0 ]]; do
       mode="full"
       shift
       ;;
+    --cublas-math)
+      cublas_math="$(require_value "$1" "${2:-}")"
+      if [[ "${cublas_math}" != "fp32" && "${cublas_math}" != "default" ]]; then
+        echo "--cublas-math must be 'fp32' or 'default', got '${cublas_math}'" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
     --cudacxx)
       cudacxx="$(require_value "$1" "${2:-}")"
       shift 2
@@ -81,4 +91,5 @@ cmake --build "${build_dir}" --target gemm_correctness_test
 
 "${build_dir}/gemm_correctness_test" \
   "--${mode}" \
+  --cublas-math "${cublas_math}" \
   --device "${device}"

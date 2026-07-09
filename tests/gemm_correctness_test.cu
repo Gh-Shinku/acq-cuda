@@ -21,6 +21,7 @@ constexpr double kRelTolerance = 1.0e-3;
 
 struct Options {
   bool full = false;
+  gemm::CublasMathMode cublas_math_mode = gemm::CublasMathMode::kFp32;
   int device = 0;
 };
 
@@ -72,6 +73,7 @@ void print_usage(const char* program) {
             << "Options:\n"
             << "  --quick      Run small and boundary correctness cases (default)\n"
             << "  --full       Run all correctness cases\n"
+            << "  --cublas-math fp32|default\n"
             << "  --device ID  CUDA device id (default: 0)\n"
             << "  --help       Show this help\n";
 }
@@ -106,6 +108,16 @@ int parse_nonnegative_int(const std::string& name, const char* value) {
   return parsed;
 }
 
+gemm::CublasMathMode parse_cublas_math_mode(const std::string& value) {
+  if (value == "fp32") {
+    return gemm::CublasMathMode::kFp32;
+  }
+  if (value == "default") {
+    return gemm::CublasMathMode::kDefault;
+  }
+  throw std::invalid_argument("--cublas-math must be 'fp32' or 'default'");
+}
+
 Options parse_args(int argc, char** argv) {
   Options options;
   for (int i = 1; i < argc; ++i) {
@@ -121,6 +133,8 @@ Options parse_args(int argc, char** argv) {
       options.full = false;
     } else if (arg == "--full") {
       options.full = true;
+    } else if (arg == "--cublas-math") {
+      options.cublas_math_mode = parse_cublas_math_mode(require_value(arg));
     } else if (arg == "--device") {
       options.device = parse_nonnegative_int(arg, require_value(arg));
     } else if (arg == "--help") {
@@ -261,6 +275,7 @@ void print_failure(const gemm::SgemmImplementation& impl, const TestCase& test,
 
 int run_correctness(const Options& options) {
   GEMM_CUDA_CHECK(cudaSetDevice(options.device));
+  gemm::set_cublas_math_mode(options.cublas_math_mode);
 
   std::vector<TestCase> cases = make_test_cases(options.full);
   int failures = 0;

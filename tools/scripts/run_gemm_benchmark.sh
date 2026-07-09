@@ -9,6 +9,7 @@ sizes="64,96,128,256,512,768,1024,1536,2048,3072,4096"
 warmup="10"
 repeat=""
 device="0"
+cublas_math="fp32"
 python_command="/home/zhaoyutong/miniconda3/bin/conda run -n base python"
 cudacxx="/home/zhaoyutong/miniconda3/envs/cuda_ws/bin/nvcc"
 skip_correctness="false"
@@ -25,6 +26,7 @@ Options:
   --warmup N             Warmup iterations (default: 10)
   --repeat N             Repeat iterations; omit to use benchmark defaults
   --device ID            CUDA device id (default: 0)
+  --cublas-math M        cuBLAS math mode: fp32 or default (default: fp32)
   --python COMMAND       Python command for plotting
   --cudacxx PATH         nvcc path for first-time CMake configure
   --skip-correctness     Run benchmark without the quick correctness gate
@@ -91,6 +93,14 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
+    --cublas-math)
+      cublas_math="$(require_value "$1" "${2:-}")"
+      if [[ "${cublas_math}" != "fp32" && "${cublas_math}" != "default" ]]; then
+        echo "--cublas-math must be 'fp32' or 'default', got '${cublas_math}'" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
     --python)
       python_command="$(require_value "$1" "${2:-}")"
       shift 2
@@ -133,6 +143,7 @@ if [[ "${skip_correctness}" == "false" ]]; then
     --build-dir "${build_dir}" \
     --device "${device}" \
     --quick \
+    --cublas-math "${cublas_math}" \
     --cudacxx "${cudacxx}"
 fi
 
@@ -142,6 +153,7 @@ benchmark_args=(
   --sizes "${sizes}"
   --warmup "${warmup}"
   --device "${device}"
+  --cublas-math "${cublas_math}"
   --csv "${csv_path}"
 )
 

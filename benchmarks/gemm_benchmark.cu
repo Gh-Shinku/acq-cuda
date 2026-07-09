@@ -21,6 +21,7 @@ struct Options {
   std::vector<int> sizes{64,  96,   128,  256,  512,  768,
                          1024, 1536, 2048, 3072, 4096};
   std::vector<std::string> impl_filter;
+  gemm::CublasMathMode cublas_math_mode = gemm::CublasMathMode::kFp32;
   int warmup = 10;
   int repeat = 50;
   bool repeat_overridden = false;
@@ -37,7 +38,7 @@ struct Metrics {
   float avg_time_ms = 0.0f;
   double tflops = 0.0;
   double bandwidth_gbs = 0.0;
-  double speedup_vs_cutlass = 1.0;
+  double speedup_vs_cublas = 1.0;
   bool valid = true;
 };
 
@@ -92,6 +93,16 @@ std::vector<int> parse_sizes(const std::string& value) {
   return sizes;
 }
 
+gemm::CublasMathMode parse_cublas_math_mode(const std::string& value) {
+  if (value == "fp32") {
+    return gemm::CublasMathMode::kFp32;
+  }
+  if (value == "default") {
+    return gemm::CublasMathMode::kDefault;
+  }
+  throw std::invalid_argument("--cublas-math must be 'fp32' or 'default'");
+}
+
 Options parse_args(int argc, char** argv) {
   Options options;
 
@@ -111,6 +122,8 @@ Options parse_args(int argc, char** argv) {
       if (options.impl_filter.empty()) {
         throw std::invalid_argument("--impl must contain at least one name");
       }
+    } else if (arg == "--cublas-math") {
+      options.cublas_math_mode = parse_cublas_math_mode(require_value(arg));
     } else if (arg == "--warmup") {
       options.warmup = std::stoi(require_value(arg));
     } else if (arg == "--repeat") {
@@ -122,7 +135,8 @@ Options parse_args(int argc, char** argv) {
       options.csv_path = require_value(arg);
     } else if (arg == "--help") {
       std::cout << "Usage: gemm_benchmark [--sizes 64,128] "
-                   "[--impl CUTLASS,CUDA Naive,CUDA Tiling] [--warmup N] "
+                   "[--impl cuBLAS,CUTLASS,CUDA Naive,CUDA SMEM] "
+                   "[--cublas-math fp32|default] [--warmup N] "
                    "[--repeat N] "
                    "[--device ID] [--csv PATH]\n";
       std::exit(0);
@@ -162,10 +176,10 @@ std::vector<gemm::SgemmImplementation> selected_implementations(
   auto baseline =
       std::find_if(selected.begin(), selected.end(),
                    [](const gemm::SgemmImplementation& impl) {
-                     return impl.is_cutlass_baseline;
+                     return impl.is_baseline;
                    });
   if (baseline == selected.end()) {
-    throw std::invalid_argument("selected implementations must include CUTLASS");
+    throw std::invalid_argument("selected implementations must include cuBLAS");
   }
   std::rotate(selected.begin(), baseline, baseline + 1);
 
@@ -309,16 +323,16 @@ std::vector<Metrics> benchmark_size(
     Metrics impl_metrics =
         make_metrics(impl.name, problem.m, problem.n, problem.k, avg_ms);
 
-    if (impl.is_cutlass_baseline) {
+    if (impl.is_baseline) {
       baseline_ms = avg_ms;
       host_baseline = std::move(host_output);
-      impl_metrics.speedup_vs_cutlass = 1.0;
+      impl_metrics.speedup_vs_cublas = 1.0;
       impl_metrics.valid = true;
     } else {
       if (baseline_ms == 0.0f) {
-        throw std::runtime_error("CUTLASS baseline must run before other kernels");
+        throw std::runtime_error("cuBLAS baseline must run before other kernels");
       }
-      impl_metrics.speedup_vs_cutlass = baseline_ms / avg_ms;
+      impl_metrics.speedup_vs_cublas = baseline_ms / avg_ms;
       compare_results(host_baseline, host_output, &impl_metrics.valid);
     }
 
@@ -330,14 +344,14 @@ std::vector<Metrics> benchmark_size(
 
 void write_header(std::ostream& os) {
   os << "size,impl,M,N,K,avg_time_ms,tflops,bandwidth_gbs,"
-        "speedup_vs_cutlass,valid\n";
+        "speedup_vs_cublas,valid\n";
 }
 
 void write_metric(std::ostream& os, const Metrics& metric) {
   os << metric.size << ',' << metric.impl << ',' << metric.m << ',' << metric.n
      << ',' << metric.k << ',' << std::fixed << std::setprecision(6)
      << metric.avg_time_ms << ',' << metric.tflops << ','
-     << metric.bandwidth_gbs << ',' << metric.speedup_vs_cutlass << ','
+     << metric.bandwidth_gbs << ',' << metric.speedup_vs_cublas << ','
      << (metric.valid ? "true" : "false") << '\n';
 }
 
@@ -347,6 +361,7 @@ int main(int argc, char** argv) {
   try {
     Options options = parse_args(argc, argv);
     GEMM_CUDA_CHECK(cudaSetDevice(options.device));
+    gemm::set_cublas_math_mode(options.cublas_math_mode);
 
     std::vector<gemm::SgemmImplementation> implementations =
         selected_implementations(options);

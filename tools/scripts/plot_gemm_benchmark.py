@@ -44,9 +44,9 @@ def plot_metric(ax, grouped, key, ylabel, title, log_y=False):
 
 def plot_speedup(ax, grouped):
     for impl in sorted(grouped):
-        if impl == "CUTLASS":
+        if impl == "cuBLAS":
             continue
-        x, y = get_xy(grouped[impl], "speedup_vs_cutlass")
+        x, y = get_xy(grouped[impl], "speedup_vs_cublas")
         ax.plot(x, y, marker="o", linewidth=1.8, label=impl)
 
     ax.axhline(
@@ -54,12 +54,12 @@ def plot_speedup(ax, grouped):
         color="tab:gray",
         linestyle="--",
         linewidth=1.5,
-        label="CUTLASS Baseline",
+        label="cuBLAS Baseline",
     )
     ax.set_xscale("log", base=2)
     ax.set_xlabel("Matrix Size (M=N=K)")
     ax.set_ylabel("Speedup (x)")
-    ax.set_title("Speedup vs CUTLASS Baseline")
+    ax.set_title("Speedup vs cuBLAS Baseline")
     ax.grid(True, alpha=0.3)
     ax.legend()
 

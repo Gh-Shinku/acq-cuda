@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 build_dir="${repo_dir}/build"
-impl="CUDA Tiling"
+impl="CUDA SMEM"
 size="1024"
 m=""
 n=""
@@ -11,6 +11,7 @@ k=""
 warmup="10"
 repeat="1"
 device="0"
+cublas_math="fp32"
 ncu_bin="ncu"
 ncu_set="full"
 output=""
@@ -22,7 +23,7 @@ usage() {
 Usage: $0 [options]
 
 Options:
-  --impl NAME        GEMM implementation name (default: CUDA Tiling)
+  --impl NAME        GEMM implementation name (default: CUDA SMEM)
   --size N           Square GEMM size (default: 1024)
   --m M              GEMM M dimension; must be used with --n and --k
   --n N              GEMM N dimension; must be used with --m and --k
@@ -30,6 +31,7 @@ Options:
   --warmup N         Warmup iterations outside ncu range (default: 10)
   --repeat N         Profiled launches inside ncu range (default: 1)
   --device ID        CUDA device id (default: 0)
+  --cublas-math M    cuBLAS math mode: fp32 or default (default: fp32)
   --ncu PATH         ncu executable (default: ncu)
   --ncu-set NAME     ncu section set (default: full)
   --output PATH      ncu output path without .ncu-rep suffix
@@ -119,6 +121,14 @@ while [[ $# -gt 0 ]]; do
       fi
       shift 2
       ;;
+    --cublas-math)
+      cublas_math="$(require_value "$1" "${2:-}")"
+      if [[ "${cublas_math}" != "fp32" && "${cublas_math}" != "default" ]]; then
+        echo "--cublas-math must be 'fp32' or 'default', got '${cublas_math}'" >&2
+        exit 2
+      fi
+      shift 2
+      ;;
     --ncu)
       ncu_bin="$(require_value "$1" "${2:-}")"
       shift 2
@@ -183,6 +193,7 @@ if [[ "${skip_correctness}" == "false" ]]; then
     --build-dir "${build_dir}" \
     --device "${device}" \
     --quick \
+    --cublas-math "${cublas_math}" \
     --cudacxx "${cudacxx}"
 fi
 
@@ -195,6 +206,7 @@ cmake --build "${build_dir}" --target gemm_profile
   "${build_dir}/gemm_profile" \
   --impl "${impl}" \
   "${profile_args[@]}" \
+  --cublas-math "${cublas_math}" \
   --warmup "${warmup}" \
   --repeat "${repeat}" \
   --device "${device}"

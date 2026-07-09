@@ -16,7 +16,8 @@
 namespace {
 
 struct Options {
-  std::string impl = "CUDA Tiling";
+  std::string impl = "CUDA SMEM";
+  gemm::CublasMathMode cublas_math_mode = gemm::CublasMathMode::kFp32;
   int m = 1024;
   int n = 1024;
   int k = 1024;
@@ -52,8 +53,9 @@ class DeviceBuffer {
 void print_usage(const char* program) {
   std::cout << "Usage: " << program
             << " [--impl NAME] [--size N | --m M --n N --k K]"
+               " [--cublas-math fp32|default]"
                " [--warmup N] [--repeat N] [--device ID]\n"
-            << "Implementations: CUTLASS, CUDA Naive, CUDA Tiling\n";
+            << "Implementations: cuBLAS, CUTLASS, CUDA Naive, CUDA SMEM\n";
 }
 
 int parse_int(const std::string& name, const char* value) {
@@ -84,6 +86,16 @@ int parse_positive_int(const std::string& name, const char* value) {
   return parsed;
 }
 
+gemm::CublasMathMode parse_cublas_math_mode(const std::string& value) {
+  if (value == "fp32") {
+    return gemm::CublasMathMode::kFp32;
+  }
+  if (value == "default") {
+    return gemm::CublasMathMode::kDefault;
+  }
+  throw std::invalid_argument("--cublas-math must be 'fp32' or 'default'");
+}
+
 Options parse_args(int argc, char** argv) {
   Options options;
 
@@ -98,6 +110,8 @@ Options parse_args(int argc, char** argv) {
 
     if (arg == "--impl") {
       options.impl = require_value(arg);
+    } else if (arg == "--cublas-math") {
+      options.cublas_math_mode = parse_cublas_math_mode(require_value(arg));
     } else if (arg == "--size") {
       int size = parse_positive_int(arg, require_value(arg));
       options.m = size;
@@ -209,6 +223,7 @@ int main(int argc, char** argv) {
   try {
     Options options = parse_args(argc, argv);
     GEMM_CUDA_CHECK(cudaSetDevice(options.device));
+    gemm::set_cublas_math_mode(options.cublas_math_mode);
     const gemm::SgemmImplementation& impl = find_implementation(options.impl);
 
     std::cout << "gemm_profile: impl=\"" << impl.name << "\""

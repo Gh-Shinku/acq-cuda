@@ -15,6 +15,11 @@ struct SgemmProblem {
   float beta = 0.0f;
 };
 
+enum class CublasMathMode {
+  kFp32,
+  kDefault,
+};
+
 using SgemmLauncher = void (*)(const SgemmProblem& problem,
                                const float* a,
                                const float* b,
@@ -25,7 +30,7 @@ using SgemmLauncher = void (*)(const SgemmProblem& problem,
 struct SgemmImplementation {
   const char* name;
   SgemmLauncher launcher;
-  bool is_cutlass_baseline;
+  bool is_baseline;
 };
 
 void launch_sgemm_naive(const SgemmProblem& problem,
@@ -48,6 +53,16 @@ void launch_sgemm_cutlass(const SgemmProblem& problem,
                           const float* c,
                           float* d,
                           cudaStream_t stream);
+
+void launch_sgemm_cublas(const SgemmProblem& problem,
+                         const float* a,
+                         const float* b,
+                         const float* c,
+                         float* d,
+                         cudaStream_t stream);
+
+void set_cublas_math_mode(CublasMathMode mode);
+CublasMathMode get_cublas_math_mode();
 
 const std::vector<SgemmImplementation>& get_sgemm_implementations();
 

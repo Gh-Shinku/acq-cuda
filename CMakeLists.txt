@@ -2,6 +2,8 @@ cmake_minimum_required(VERSION 3.22)
 
 project(CudaDeviceQuery LANGUAGES CXX CUDA)
 
+find_package(CUDAToolkit REQUIRED)
+
 if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING
     "Build type for single-config generators" FORCE)
@@ -35,6 +37,7 @@ add_executable(gemm_profile tools/profile/gemm_profile.cu)
 add_executable(gemm_correctness_test tests/gemm_correctness_test.cu)
 add_library(gemm_kernels STATIC
   src/gemm/registry.cu
+  src/gemm/sgemm_cublas.cu
   src/gemm/sgemm_cutlass.cu
   src/gemm/sgemm_naive.cu
   src/gemm/sgemm_smem.cu
@@ -56,6 +59,7 @@ target_compile_options(gemm_kernels PRIVATE
   $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Release>>:-O3>
   $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:RelWithDebInfo>>:-O2>
   $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<BOOL:${ACQ_CUDA_LINE_INFO}>>:--generate-line-info>)
+target_link_libraries(gemm_kernels PUBLIC CUDA::cublas)
 
 target_link_libraries(cu3 PRIVATE gemm_kernels)
 target_link_libraries(gemm_benchmark PRIVATE gemm_kernels)
