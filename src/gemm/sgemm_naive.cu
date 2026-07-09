@@ -3,29 +3,30 @@
 
 #include <cuda_runtime.h>
 
-namespace gemm {
+#include <cstddef>
 
-constexpr int block_size = 16;
+namespace gemm {
 
 namespace {
 
-__global__ void sgemm_naive_kernel(SgemmProblem problem, const float *a,
-                                   const float *b, const float *c, float *d) {
-  int row = blockIdx.y * blockDim.y + threadIdx.y;
-  int col = blockIdx.x * blockDim.x + threadIdx.x;
+template <typename T, size_t BLOCK_SIZE_X, size_t BLOCK_SIZE_Y>
+__global__ void sgemm_naive(size_t m, size_t n, size_t k, T const* A,
+                            T const* B, T const* C, T* D, T alpha, T beta) {
+  size_t const row{blockIdx.y * BLOCK_SIZE_Y + threadIdx.y};
+  size_t const col{blockIdx.x * BLOCK_SIZE_X + threadIdx.x};
 
-  if (row >= problem.m || col >= problem.n) {
+  if (row >= m || col >= n) {
     return;
   }
 
-  float sum = 0.0f;
-  for (int inner = 0; inner < problem.k; ++inner) {
-    sum += a[row * problem.k + inner] * b[inner * problem.n + col];
+  T sum{};
+  for (size_t inner{}; inner < k; ++inner) {
+    sum += A[row * k + inner] * B[inner * n + col];
   }
 
-  int idx = row * problem.n + col;
-  float previous = (problem.beta != 0.0f && c != nullptr) ? c[idx] : 0.0f;
-  d[idx] = problem.alpha * sum + problem.beta * previous;
+  size_t const idx{row * n + col};
+  T const previous{(beta != T{} && C != nullptr) ? C[idx] : T{}};
+  D[idx] = alpha * sum + beta * previous;
 }
 
 } // namespace
@@ -33,11 +34,20 @@ __global__ void sgemm_naive_kernel(SgemmProblem problem, const float *a,
 void launch_sgemm_naive(const SgemmProblem &problem, const float *a,
                         const float *b, const float *c, float *d,
                         cudaStream_t stream) {
-  dim3 block(block_size, block_size);
-  dim3 grid((problem.n + block.x - 1) / block.x,
-            (problem.m + block.y - 1) / block.y);
+  constexpr size_t BLOCK_SIZE_X{16};
+  constexpr size_t BLOCK_SIZE_Y{16};
+  dim3 const block_dim{static_cast<unsigned int>(BLOCK_SIZE_X),
+                       static_cast<unsigned int>(BLOCK_SIZE_Y), 1};
+  dim3 const grid_dim{
+      static_cast<unsigned int>((problem.n + BLOCK_SIZE_X - 1) / BLOCK_SIZE_X),
+      static_cast<unsigned int>((problem.m + BLOCK_SIZE_Y - 1) / BLOCK_SIZE_Y),
+      1};
 
-  sgemm_naive_kernel<<<grid, block, 0, stream>>>(problem, a, b, c, d);
+  sgemm_naive<float, BLOCK_SIZE_X, BLOCK_SIZE_Y>
+      <<<grid_dim, block_dim, 0, stream>>>(
+          static_cast<size_t>(problem.m), static_cast<size_t>(problem.n),
+          static_cast<size_t>(problem.k), a, b, c, d, problem.alpha,
+          problem.beta);
   GEMM_CUDA_CHECK(cudaGetLastError());
 }
 

@@ -3,69 +3,87 @@
 
 #include <cuda_runtime.h>
 
-namespace gemm {
+#include <cstddef>
 
-constexpr int block_size = 16;
-constexpr int tile_size = block_size;
+namespace gemm {
 
 namespace {
 
-__global__ void sgemm_smem_kernel(SgemmProblem problem, const float *a,
-                                  const float *b, const float *c, float *d) {
-  __shared__ float tile_a[tile_size * tile_size];
-  __shared__ float tile_b[tile_size * tile_size];
+template <typename T, size_t BLOCK_TILE_SIZE_X, size_t BLOCK_TILE_SIZE_Y,
+          size_t BLOCK_TILE_SIZE_K>
+__global__ void sgemm_smem(size_t m, size_t n, size_t k, T const* A,
+                           T const* B, T const* C, T* D, T alpha, T beta) {
+  __shared__ T A_thread_block_tile[BLOCK_TILE_SIZE_Y][BLOCK_TILE_SIZE_K];
+  __shared__ T B_thread_block_tile[BLOCK_TILE_SIZE_K][BLOCK_TILE_SIZE_X];
 
-  /* thread index in grid */
-  const int row = blockIdx.y * blockDim.y + threadIdx.y;
-  const int col = blockIdx.x * blockDim.x + threadIdx.x;
+  size_t const row{blockIdx.y * BLOCK_TILE_SIZE_Y + threadIdx.y};
+  size_t const col{blockIdx.x * BLOCK_TILE_SIZE_X + threadIdx.x};
 
-  float sum = 0;
-  a += blockIdx.y * blockDim.y * problem.k;
-  b += blockIdx.x * blockDim.x;
+  T sum{};
 
-  /* iterate `ceil(K / tile_size)` rounds */
-  for (int tile_idx = 0; tile_idx < problem.k; tile_idx += tile_size) {
-    /* copy data from matrix to tile */
-    if (row < problem.m && tile_idx + threadIdx.x < problem.k) {
-      tile_a[threadIdx.y * tile_size + threadIdx.x] =
-          a[tile_idx + threadIdx.y * problem.k + threadIdx.x];
+  size_t const num_thread_block_tiles{(k + BLOCK_TILE_SIZE_K - 1) /
+                                      BLOCK_TILE_SIZE_K};
+  for (size_t thread_block_tile_idx{}; thread_block_tile_idx <
+                                      num_thread_block_tiles;
+       ++thread_block_tile_idx) {
+    size_t const A_row_idx{row};
+    size_t const A_col_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
+                           threadIdx.x};
+    if (A_row_idx < m && A_col_idx < k) {
+      A_thread_block_tile[threadIdx.y][threadIdx.x] =
+          A[A_row_idx * k + A_col_idx];
     } else {
-      tile_a[threadIdx.y * tile_size + threadIdx.x] = 0;
+      A_thread_block_tile[threadIdx.y][threadIdx.x] = T{};
     }
-    if (tile_idx + threadIdx.y < problem.k && col < problem.n) {
-      tile_b[threadIdx.y * tile_size + threadIdx.x] =
-          b[(tile_idx + threadIdx.y) * problem.n + threadIdx.x];
+
+    size_t const B_row_idx{thread_block_tile_idx * BLOCK_TILE_SIZE_K +
+                           threadIdx.y};
+    size_t const B_col_idx{col};
+    if (B_row_idx < k && B_col_idx < n) {
+      B_thread_block_tile[threadIdx.y][threadIdx.x] =
+          B[B_row_idx * n + B_col_idx];
     } else {
-      tile_b[threadIdx.y * tile_size + threadIdx.x] = 0;
+      B_thread_block_tile[threadIdx.y][threadIdx.x] = T{};
     }
-    /* wait for tile data to be prepared */
     __syncthreads();
 
-    /* dot product */
-    for (int dot_idx = 0; dot_idx < tile_size; ++dot_idx) {
-      sum += tile_a[threadIdx.y * tile_size + dot_idx] *
-             tile_b[dot_idx * tile_size + threadIdx.x];
+    for (size_t k_i{}; k_i < BLOCK_TILE_SIZE_K; ++k_i) {
+      sum += A_thread_block_tile[threadIdx.y][k_i] *
+             B_thread_block_tile[k_i][threadIdx.x];
     }
 
-    /* wait to avoid fetching next tile */
     __syncthreads();
   }
 
-  if (row < problem.m && col < problem.n) {
-    d[row * problem.n + col] =
-        problem.alpha * sum + problem.beta * c[row * problem.n + col];
+  if (row < m && col < n) {
+    size_t const idx{row * n + col};
+    T const previous{(beta != T{} && C != nullptr) ? C[idx] : T{}};
+    D[idx] = alpha * sum + beta * previous;
   }
 }
+
 } // namespace
 
 void launch_sgemm_smem(const SgemmProblem &problem, const float *a,
                        const float *b, const float *c, float *d,
                        cudaStream_t stream) {
-  dim3 block(block_size, block_size);
-  dim3 grid((problem.n + block.x - 1) / block.x,
-            (problem.m + block.y - 1) / block.y);
+  constexpr size_t BLOCK_TILE_SIZE_X{16};
+  constexpr size_t BLOCK_TILE_SIZE_Y{16};
+  constexpr size_t BLOCK_TILE_SIZE_K{16};
+  dim3 const block_dim{static_cast<unsigned int>(BLOCK_TILE_SIZE_X),
+                       static_cast<unsigned int>(BLOCK_TILE_SIZE_Y), 1};
+  dim3 const grid_dim{
+      static_cast<unsigned int>((problem.n + BLOCK_TILE_SIZE_X - 1) /
+                                BLOCK_TILE_SIZE_X),
+      static_cast<unsigned int>((problem.m + BLOCK_TILE_SIZE_Y - 1) /
+                                BLOCK_TILE_SIZE_Y),
+      1};
 
-  sgemm_smem_kernel<<<grid, block, 0, stream>>>(problem, a, b, c, d);
+  sgemm_smem<float, BLOCK_TILE_SIZE_X, BLOCK_TILE_SIZE_Y, BLOCK_TILE_SIZE_K>
+      <<<grid_dim, block_dim, 0, stream>>>(
+          static_cast<size_t>(problem.m), static_cast<size_t>(problem.n),
+          static_cast<size_t>(problem.k), a, b, c, d, problem.alpha,
+          problem.beta);
   GEMM_CUDA_CHECK(cudaGetLastError());
 }
 
