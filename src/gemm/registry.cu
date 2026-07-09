@@ -7,7 +7,8 @@ const std::vector<SgemmImplementation> &get_sgemm_implementations() {
       {"cuBLAS", launch_sgemm_cublas, true},
       {"CUTLASS", launch_sgemm_cutlass, false},
       {"CUDA Naive", launch_sgemm_naive, false},
-      {"CUDA SMEM", launch_sgemm_smem, false}};
+      {"CUDA SMEM", launch_sgemm_smem, false},
+      {"CUDA Thread Tiling", launch_sgemm_thread_tiling, false}};
   return implementations;
 }
 

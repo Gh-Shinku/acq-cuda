@@ -47,6 +47,13 @@ void launch_sgemm_smem(const SgemmProblem& problem,
                        float* d,
                        cudaStream_t stream);
 
+void launch_sgemm_thread_tiling(const SgemmProblem& problem,
+                                const float* a,
+                                const float* b,
+                                const float* c,
+                                float* d,
+                                cudaStream_t stream);
+
 void launch_sgemm_cutlass(const SgemmProblem& problem,
                           const float* a,
                           const float* b,
