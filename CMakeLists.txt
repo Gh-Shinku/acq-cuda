@@ -43,6 +43,7 @@ add_library(gemm_kernels STATIC
   src/gemm/sgemm_naive.cu
   src/gemm/sgemm_smem.cu
   src/gemm/sgemm_thread_tiling.cu
+  src/gemm/sgemm_wmma_tf32.cu
   src/gemm/sgemm_warp_tiling.cu
 )
 

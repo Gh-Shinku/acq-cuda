@@ -15,6 +15,11 @@ struct SgemmProblem {
   float beta = 0.0f;
 };
 
+enum class SgemmAccuracy {
+  kFp32,
+  kTf32Approx,
+};
+
 enum class CublasMathMode {
   kFp32,
   kDefault,
@@ -31,6 +36,7 @@ struct SgemmImplementation {
   const char* name;
   SgemmLauncher launcher;
   bool is_baseline;
+  SgemmAccuracy accuracy;
 };
 
 void launch_sgemm_naive(const SgemmProblem& problem,
@@ -68,12 +74,26 @@ void launch_sgemm_async_tiling(const SgemmProblem& problem,
                                float* d,
                                cudaStream_t stream);
 
+void launch_sgemm_wmma_tf32(const SgemmProblem& problem,
+                            const float* a,
+                            const float* b,
+                            const float* c,
+                            float* d,
+                            cudaStream_t stream);
+
 void launch_sgemm_cutlass(const SgemmProblem& problem,
                           const float* a,
                           const float* b,
                           const float* c,
                           float* d,
                           cudaStream_t stream);
+
+void launch_sgemm_cutlass_tensorop_tf32(const SgemmProblem& problem,
+                                        const float* a,
+                                        const float* b,
+                                        const float* c,
+                                        float* d,
+                                        cudaStream_t stream);
 
 void launch_sgemm_cublas(const SgemmProblem& problem,
                          const float* a,

@@ -18,6 +18,8 @@ namespace {
 
 constexpr double kAbsTolerance = 1.0e-3;
 constexpr double kRelTolerance = 1.0e-3;
+constexpr double kTf32AbsTolerance = 5.0e-2;
+constexpr double kTf32RelTolerance = 2.0e-2;
 
 struct Options {
   bool full = false;
@@ -155,6 +157,7 @@ std::vector<TestCase> make_test_cases(bool full) {
       {17, 17, 17, 1.0f, 0.0f, "tile_plus_one_17"},
       {31, 33, 17, 1.0f, 0.0f, "non_square_boundary"},
       {32, 32, 32, 0.0f, 1.0f, "beta_only"},
+      {64, 64, 64, 1.0f, 0.0f, "wmma_tf32_aligned"},
       {33, 31, 17, 1.25f, -0.5f, "alpha_beta_mixed"},
   };
 
@@ -201,7 +204,9 @@ std::vector<float> reference_sgemm(const TestCase& test,
 }
 
 Comparison compare_results(const std::vector<float>& expected,
-                           const std::vector<float>& actual) {
+                           const std::vector<float>& actual,
+                           double abs_tolerance,
+                           double rel_tolerance) {
   Comparison result;
   for (size_t i = 0; i < expected.size(); ++i) {
     double abs_error =
@@ -212,8 +217,8 @@ Comparison compare_results(const std::vector<float>& expected,
     result.max_abs_error = std::max(result.max_abs_error, abs_error);
     result.max_rel_error = std::max(result.max_rel_error, rel_error);
 
-    if (result.passed && abs_error > kAbsTolerance &&
-        rel_error > kRelTolerance) {
+    if (result.passed && abs_error > abs_tolerance &&
+        rel_error > rel_tolerance) {
       result.passed = false;
       result.mismatch_index = i;
       result.expected = expected[i];
@@ -221,6 +226,12 @@ Comparison compare_results(const std::vector<float>& expected,
     }
   }
   return result;
+}
+
+bool uses_approximate_math(const gemm::SgemmImplementation& impl) {
+  return impl.accuracy == gemm::SgemmAccuracy::kTf32Approx ||
+         (impl.is_baseline &&
+          gemm::get_cublas_math_mode() == gemm::CublasMathMode::kDefault);
 }
 
 Comparison run_case(const gemm::SgemmImplementation& impl,
@@ -256,7 +267,11 @@ Comparison run_case(const gemm::SgemmImplementation& impl,
   GEMM_CUDA_CHECK(cudaMemcpy(actual.data(), dev_d.get(), dev_d.bytes(),
                              cudaMemcpyDeviceToHost));
 
-  return compare_results(expected, actual);
+  double const abs_tolerance =
+      uses_approximate_math(impl) ? kTf32AbsTolerance : kAbsTolerance;
+  double const rel_tolerance =
+      uses_approximate_math(impl) ? kTf32RelTolerance : kRelTolerance;
+  return compare_results(expected, actual, abs_tolerance, rel_tolerance);
 }
 
 void print_failure(const gemm::SgemmImplementation& impl, const TestCase& test,

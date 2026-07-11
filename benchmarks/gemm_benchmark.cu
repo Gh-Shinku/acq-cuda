@@ -17,6 +17,11 @@
 
 namespace {
 
+constexpr double kAbsTolerance = 1.0e-2;
+constexpr double kRelTolerance = 1.0e-2;
+constexpr double kTf32AbsTolerance = 5.0e-2;
+constexpr double kTf32RelTolerance = 2.0e-2;
+
 struct Options {
   std::vector<int> sizes{64,  96,   128,  256,  512,  768,
                          1024, 1536, 2048, 3072, 4096};
@@ -135,8 +140,9 @@ Options parse_args(int argc, char** argv) {
       options.csv_path = require_value(arg);
     } else if (arg == "--help") {
       std::cout << "Usage: gemm_benchmark [--sizes 64,128] "
-                   "[--impl cuBLAS,CUTLASS,CUDA Naive,CUDA SMEM,"
-                   "CUDA Thread Tiling,CUDA Warp Tiling,CUDA Async Tiling] "
+                   "[--impl cuBLAS,CUTLASS,CUTLASS TensorOp TF32,"
+                   "CUDA Naive,CUDA SMEM,CUDA Thread Tiling,"
+                   "CUDA Warp Tiling,CUDA Async Tiling,CUDA WMMA TF32] "
                    "[--cublas-math fp32|default] [--warmup N] "
                    "[--repeat N] "
                    "[--device ID] [--csv PATH]\n";
@@ -240,10 +246,8 @@ float time_kernel(Fn&& fn, int warmup, int repeat) {
 }
 
 void compare_results(const std::vector<float>& expected,
-                     const std::vector<float>& actual, bool* passed) {
-  constexpr double kAbsTolerance = 1.0e-2;
-  constexpr double kRelTolerance = 1.0e-2;
-
+                     const std::vector<float>& actual, double abs_tolerance,
+                     double rel_tolerance, bool* passed) {
   *passed = true;
   for (size_t i = 0; i < expected.size(); ++i) {
     double abs_error =
@@ -251,11 +255,17 @@ void compare_results(const std::vector<float>& expected,
     double denom = std::max(1.0, std::abs(static_cast<double>(expected[i])));
     double rel_error = abs_error / denom;
 
-    if (abs_error > kAbsTolerance && rel_error > kRelTolerance) {
+    if (abs_error > abs_tolerance && rel_error > rel_tolerance) {
       *passed = false;
       return;
     }
   }
+}
+
+bool uses_approximate_math(const gemm::SgemmImplementation& impl,
+                           const Options& options) {
+  return impl.accuracy == gemm::SgemmAccuracy::kTf32Approx ||
+         options.cublas_math_mode == gemm::CublasMathMode::kDefault;
 }
 
 Metrics make_metrics(const std::string& impl, int m, int n, int k,
@@ -334,7 +344,14 @@ std::vector<Metrics> benchmark_size(
         throw std::runtime_error("cuBLAS baseline must run before other kernels");
       }
       impl_metrics.speedup_vs_cublas = baseline_ms / avg_ms;
-      compare_results(host_baseline, host_output, &impl_metrics.valid);
+      double const abs_tolerance =
+          uses_approximate_math(impl, options) ? kTf32AbsTolerance
+                                               : kAbsTolerance;
+      double const rel_tolerance =
+          uses_approximate_math(impl, options) ? kTf32RelTolerance
+                                               : kRelTolerance;
+      compare_results(host_baseline, host_output, abs_tolerance, rel_tolerance,
+                      &impl_metrics.valid);
     }
 
     metrics.push_back(impl_metrics);

@@ -14,6 +14,8 @@ namespace {
 using RowMajor = cutlass::layout::RowMajor;
 using EpilogueOutputOp =
     cutlass::epilogue::thread::LinearCombination<float, 1, float, float>;
+using TensorOpEpilogueOutputOp =
+    cutlass::epilogue::thread::LinearCombination<float, 4, float, float>;
 
 template <int ThreadblockM, int ThreadblockN, int ThreadblockK, int WarpM,
           int WarpN, int WarpK>
@@ -30,6 +32,15 @@ using CompactSgemm = SimtSgemm<64, 64, 8, 32, 32, 8>;
 using TallSgemm = SimtSgemm<128, 64, 8, 32, 64, 8>;
 using LargeSgemm = SimtSgemm<128, 128, 8, 32, 64, 8>;
 
+using TensorOpTf32Sgemm = cutlass::gemm::device::Gemm<
+    float, RowMajor, float, RowMajor, float, RowMajor, float,
+    cutlass::arch::OpClassTensorOp, cutlass::arch::Sm80,
+    cutlass::gemm::GemmShape<128, 128, 16>,
+    cutlass::gemm::GemmShape<64, 64, 16>,
+    cutlass::gemm::GemmShape<16, 8, 8>, TensorOpEpilogueOutputOp,
+    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>, 4, 4, 4,
+    false, cutlass::arch::OpMultiplyAddFastF32>;
+
 template <typename CutlassGemm>
 void launch_cutlass_gemm(const SgemmProblem& problem, const float* a,
                          const float* b, const float* c, float* d,
@@ -41,6 +52,22 @@ void launch_cutlass_gemm(const SgemmProblem& problem, const float* a,
                                        {problem.alpha, problem.beta});
 
   GEMM_CUTLASS_CHECK(gemm(args, nullptr, stream));
+}
+
+bool supports_tensor_cores() {
+  static thread_local bool supported = [] {
+    int device = 0;
+    GEMM_CUDA_CHECK(cudaGetDevice(&device));
+
+    cudaDeviceProp properties{};
+    GEMM_CUDA_CHECK(cudaGetDeviceProperties(&properties, device));
+    return properties.major >= 8;
+  }();
+  return supported;
+}
+
+bool can_use_cutlass_tensorop_tf32(const SgemmProblem& problem) {
+  return supports_tensor_cores() && problem.n % 4 == 0 && problem.k % 4 == 0;
 }
 
 }  // namespace
@@ -58,6 +85,18 @@ void launch_sgemm_cutlass(const SgemmProblem& problem, const float* a,
   } else {
     launch_cutlass_gemm<LargeSgemm>(problem, a, b, c, d, stream);
   }
+}
+
+void launch_sgemm_cutlass_tensorop_tf32(const SgemmProblem& problem,
+                                        const float* a, const float* b,
+                                        const float* c, float* d,
+                                        cudaStream_t stream) {
+  if (!can_use_cutlass_tensorop_tf32(problem)) {
+    launch_sgemm_cutlass(problem, a, b, c, d, stream);
+    return;
+  }
+
+  launch_cutlass_gemm<TensorOpTf32Sgemm>(problem, a, b, c, d, stream);
 }
 
 }  // namespace gemm
