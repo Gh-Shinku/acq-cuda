@@ -9,7 +9,8 @@ const std::vector<SgemmImplementation> &get_sgemm_implementations() {
       {"CUDA Naive", launch_sgemm_naive, false},
       {"CUDA SMEM", launch_sgemm_smem, false},
       {"CUDA Thread Tiling", launch_sgemm_thread_tiling, false},
-      {"CUDA Warp Tiling", launch_sgemm_warp_tiling, false}};
+      {"CUDA Warp Tiling", launch_sgemm_warp_tiling, false},
+      {"CUDA Async Tiling", launch_sgemm_async_tiling, false}};
   return implementations;
 }
 

@@ -136,7 +136,7 @@ Options parse_args(int argc, char** argv) {
     } else if (arg == "--help") {
       std::cout << "Usage: gemm_benchmark [--sizes 64,128] "
                    "[--impl cuBLAS,CUTLASS,CUDA Naive,CUDA SMEM,"
-                   "CUDA Thread Tiling,CUDA Warp Tiling] "
+                   "CUDA Thread Tiling,CUDA Warp Tiling,CUDA Async Tiling] "
                    "[--cublas-math fp32|default] [--warmup N] "
                    "[--repeat N] "
                    "[--device ID] [--csv PATH]\n";

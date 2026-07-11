@@ -37,6 +37,7 @@ add_executable(gemm_profile tools/profile/gemm_profile.cu)
 add_executable(gemm_correctness_test tests/gemm_correctness_test.cu)
 add_library(gemm_kernels STATIC
   src/gemm/registry.cu
+  src/gemm/sgemm_async_tiling.cu
   src/gemm/sgemm_cublas.cu
   src/gemm/sgemm_cutlass.cu
   src/gemm/sgemm_naive.cu
