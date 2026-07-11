@@ -56,7 +56,7 @@ void print_usage(const char* program) {
                " [--cublas-math fp32|default]"
                " [--warmup N] [--repeat N] [--device ID]\n"
             << "Implementations: cuBLAS, CUTLASS, CUDA Naive, CUDA SMEM, "
-               "CUDA Thread Tiling\n";
+               "CUDA Thread Tiling, CUDA Warp Tiling\n";
 }
 
 int parse_int(const std::string& name, const char* value) {

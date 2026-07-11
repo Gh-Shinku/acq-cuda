@@ -42,6 +42,7 @@ add_library(gemm_kernels STATIC
   src/gemm/sgemm_naive.cu
   src/gemm/sgemm_smem.cu
   src/gemm/sgemm_thread_tiling.cu
+  src/gemm/sgemm_warp_tiling.cu
 )
 
 foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark gemm_profile
