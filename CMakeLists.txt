@@ -32,6 +32,7 @@ target_link_libraries(matrix_test PRIVATE Catch2::Catch2WithMain)
 add_executable(cu1 src/misc/cu1.cu)
 add_executable(cu2 src/misc/cu2.cu)
 add_executable(cu3 src/misc/cu3.cu)
+add_executable(cut1 src/cutlass/cut1.cu)
 add_executable(gemm_benchmark benchmarks/gemm_benchmark.cu)
 add_executable(gemm_profile tools/profile/gemm_profile.cu)
 add_executable(gemm_correctness_test tests/gemm_correctness_test.cu)
@@ -47,22 +48,31 @@ add_library(gemm_kernels STATIC
   src/gemm/sgemm_warp_tiling.cu
 )
 
-foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark gemm_profile
-  gemm_correctness_test)
-  target_include_directories(${target} PRIVATE "${CMAKE_SOURCE_DIR}/include")
-endforeach()
+add_library(acq_project_headers INTERFACE)
+target_include_directories(acq_project_headers INTERFACE
+  "${CMAKE_SOURCE_DIR}/include"
+)
 
-target_include_directories(gemm_kernels PUBLIC
-  "${CMAKE_SOURCE_DIR}/include")
-target_include_directories(gemm_kernels PRIVATE
+add_library(cutlass_headers INTERFACE)
+target_include_directories(cutlass_headers INTERFACE
   "${CMAKE_SOURCE_DIR}/third_party/cutlass/include"
   "${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include"
 )
-target_compile_options(gemm_kernels PRIVATE
-  $<$<COMPILE_LANGUAGE:CUDA>:--expt-relaxed-constexpr>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:Release>>:-O3>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<CONFIG:RelWithDebInfo>>:-O2>
-  $<$<AND:$<COMPILE_LANGUAGE:CUDA>,$<BOOL:${ACQ_CUDA_LINE_INFO}>>:--generate-line-info>)
+
+foreach(target matrix_test cu1 cu2 cu3 cut1 gemm_benchmark gemm_profile
+  gemm_correctness_test gemm_kernels)
+  target_link_libraries(${target} PRIVATE acq_project_headers)
+endforeach()
+
+foreach(target gemm_kernels cut1)
+  target_link_libraries(${target} PRIVATE cutlass_headers)
+  target_compile_options(${target} PRIVATE --expt-relaxed-constexpr)
+endforeach()
+
+if(ACQ_CUDA_LINE_INFO)
+  target_compile_options(gemm_kernels PRIVATE --generate-line-info)
+endif()
+
 target_link_libraries(gemm_kernels PUBLIC CUDA::cublas)
 
 target_link_libraries(cu3 PRIVATE gemm_kernels)
