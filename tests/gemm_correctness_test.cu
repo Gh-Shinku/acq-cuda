@@ -1,5 +1,6 @@
 #include "gemm/check.hpp"
 #include "gemm/sgemm.hpp"
+#include "cuda/device_buffer.hpp"
 
 #include <cuda_runtime.h>
 
@@ -43,30 +44,6 @@ struct Comparison {
   size_t mismatch_index = 0;
   float expected = 0.0f;
   float actual = 0.0f;
-};
-
-template <typename T>
-class DeviceBuffer {
- public:
-  explicit DeviceBuffer(size_t count) : count_(count) {
-    GEMM_CUDA_CHECK(cudaMalloc(&ptr_, count_ * sizeof(T)));
-  }
-
-  ~DeviceBuffer() {
-    if (ptr_ != nullptr) {
-      cudaFree(ptr_);
-    }
-  }
-
-  DeviceBuffer(const DeviceBuffer&) = delete;
-  DeviceBuffer& operator=(const DeviceBuffer&) = delete;
-
-  T* get() const { return ptr_; }
-  size_t bytes() const { return count_ * sizeof(T); }
-
- private:
-  T* ptr_ = nullptr;
-  size_t count_ = 0;
 };
 
 void print_usage(const char* program) {
@@ -245,26 +222,26 @@ Comparison run_case(const gemm::SgemmImplementation& impl,
   std::vector<float> host_c = make_matrix(test.m, test.n, 300 + test.k);
   std::vector<float> expected = reference_sgemm(test, host_a, host_b, host_c);
 
-  DeviceBuffer<float> dev_a(a_count);
-  DeviceBuffer<float> dev_b(b_count);
-  DeviceBuffer<float> dev_c(c_count);
-  DeviceBuffer<float> dev_d(c_count);
+  acq::cuda::DeviceBuffer<float> dev_a(a_count);
+  acq::cuda::DeviceBuffer<float> dev_b(b_count);
+  acq::cuda::DeviceBuffer<float> dev_c(c_count);
+  acq::cuda::DeviceBuffer<float> dev_d(c_count);
 
   GEMM_CUDA_CHECK(
-      cudaMemcpy(dev_a.get(), host_a.data(), dev_a.bytes(), cudaMemcpyHostToDevice));
+      cudaMemcpy(dev_a.data(), host_a.data(), dev_a.bytes(), cudaMemcpyHostToDevice));
   GEMM_CUDA_CHECK(
-      cudaMemcpy(dev_b.get(), host_b.data(), dev_b.bytes(), cudaMemcpyHostToDevice));
+      cudaMemcpy(dev_b.data(), host_b.data(), dev_b.bytes(), cudaMemcpyHostToDevice));
   GEMM_CUDA_CHECK(
-      cudaMemcpy(dev_c.get(), host_c.data(), dev_c.bytes(), cudaMemcpyHostToDevice));
-  GEMM_CUDA_CHECK(cudaMemset(dev_d.get(), 0, dev_d.bytes()));
+      cudaMemcpy(dev_c.data(), host_c.data(), dev_c.bytes(), cudaMemcpyHostToDevice));
+  GEMM_CUDA_CHECK(cudaMemset(dev_d.data(), 0, dev_d.bytes()));
 
   gemm::SgemmProblem problem{test.m, test.n, test.k, test.alpha, test.beta};
-  impl.launcher(problem, dev_a.get(), dev_b.get(), dev_c.get(), dev_d.get(),
+  impl.launcher(problem, dev_a.data(), dev_b.data(), dev_c.data(), dev_d.data(),
                 nullptr);
   GEMM_CUDA_CHECK(cudaDeviceSynchronize());
 
   std::vector<float> actual(c_count);
-  GEMM_CUDA_CHECK(cudaMemcpy(actual.data(), dev_d.get(), dev_d.bytes(),
+  GEMM_CUDA_CHECK(cudaMemcpy(actual.data(), dev_d.data(), dev_d.bytes(),
                              cudaMemcpyDeviceToHost));
 
   double const abs_tolerance =

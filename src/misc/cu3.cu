@@ -1,3 +1,4 @@
+#include "cuda/device_buffer.hpp"
 #include "gemm/check.hpp"
 #include "gemm/sgemm.hpp"
 #include "matrix.hpp"
@@ -58,27 +59,27 @@ int main() {
     Matrix<float> cpu_out(num_rows_a, num_cols_b, 0.0f);
     Matrix<float> cuda_out(num_rows_a, num_cols_b, 0.0f);
 
-    CudaMemory<float> cuda_a(num_rows_a * num_cols_a);
-    CudaMemory<float> cuda_b(num_cols_a * num_cols_b);
-    CudaMemory<float> cuda_c(num_rows_a * num_cols_b);
-    CudaMemory<float> cuda_d(num_rows_a * num_cols_b);
+    acq::cuda::DeviceBuffer<float> cuda_a(num_rows_a * num_cols_a);
+    acq::cuda::DeviceBuffer<float> cuda_b(num_cols_a * num_cols_b);
+    acq::cuda::DeviceBuffer<float> cuda_c(num_rows_a * num_cols_b);
+    acq::cuda::DeviceBuffer<float> cuda_d(num_rows_a * num_cols_b);
 
-    GEMM_CUDA_CHECK(cudaMemcpy(cuda_a.ptr(), cpu_a.ptr(), cuda_a.getSize(),
+    GEMM_CUDA_CHECK(cudaMemcpy(cuda_a.data(), cpu_a.ptr(), cuda_a.bytes(),
                                cudaMemcpyHostToDevice));
-    GEMM_CUDA_CHECK(cudaMemcpy(cuda_b.ptr(), cpu_b.ptr(), cuda_b.getSize(),
+    GEMM_CUDA_CHECK(cudaMemcpy(cuda_b.data(), cpu_b.ptr(), cuda_b.bytes(),
                                cudaMemcpyHostToDevice));
-    GEMM_CUDA_CHECK(cudaMemcpy(cuda_c.ptr(), cpu_c.ptr(), cuda_c.getSize(),
+    GEMM_CUDA_CHECK(cudaMemcpy(cuda_c.data(), cpu_c.ptr(), cuda_c.bytes(),
                                cudaMemcpyHostToDevice));
-    GEMM_CUDA_CHECK(cudaMemset(cuda_d.ptr(), 0, cuda_d.getSize()));
+    GEMM_CUDA_CHECK(cudaMemset(cuda_d.data(), 0, cuda_d.bytes()));
 
     Matrix<float> matrix_out = cpu_a * cpu_b;
     cpu_naive_gemm(num_rows_a, num_cols_a, num_cols_b, alpha, cpu_a.ptr(),
                    cpu_b.ptr(), cpu_c.ptr(), beta, cpu_out.ptr());
 
     gemm::SgemmProblem problem{num_rows_a, num_cols_b, num_cols_a, alpha, beta};
-    gemm::launch_sgemm_naive(problem, cuda_a.ptr(), cuda_b.ptr(), cuda_c.ptr(),
-                             cuda_d.ptr(), nullptr);
-    GEMM_CUDA_CHECK(cudaMemcpy(cuda_out.ptr(), cuda_d.ptr(), cuda_d.getSize(),
+    gemm::launch_sgemm_naive(problem, cuda_a.data(), cuda_b.data(), cuda_c.data(),
+                             cuda_d.data(), nullptr);
+    GEMM_CUDA_CHECK(cudaMemcpy(cuda_out.ptr(), cuda_d.data(), cuda_d.bytes(),
                                cudaMemcpyDeviceToHost));
 
     std::cout << "[cpu_naive_gemm]"

@@ -1,5 +1,7 @@
 #include <catch2/catch_test_macros.hpp>
 
+#include "cuda/check.hpp"
+#include "cuda/device_buffer.hpp"
 #include "ops/tanh.hpp"
 
 #include <cuda_runtime.h>
@@ -8,61 +10,30 @@
 #include <cmath>
 #include <cstddef>
 #include <random>
-#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
 
 namespace {
 
-void check_cuda(cudaError_t status, const char* operation) {
-  if (status != cudaSuccess) {
-    throw std::runtime_error(std::string(operation) + ": " +
-                             cudaGetErrorString(status));
-  }
-}
-
-class DeviceBuffer {
- public:
-  explicit DeviceBuffer(std::size_t count) {
-    check_cuda(cudaMalloc(&ptr_, count * sizeof(float)), "cudaMalloc");
-  }
-
-  ~DeviceBuffer() {
-    if (ptr_ != nullptr) {
-      cudaFree(ptr_);
-    }
-  }
-
-  DeviceBuffer(const DeviceBuffer&) = delete;
-  DeviceBuffer& operator=(const DeviceBuffer&) = delete;
-
-  float* get() const { return ptr_; }
-
- private:
-  float* ptr_ = nullptr;
-};
-
 std::vector<float> run_tanh(const std::vector<float>& input) {
   if (input.empty()) {
     return {};
   }
 
-  DeviceBuffer device_input(input.size());
-  DeviceBuffer device_output(input.size());
+  acq::cuda::DeviceBuffer<float> device_input(input.size());
+  acq::cuda::DeviceBuffer<float> device_output(input.size());
   std::size_t const bytes = input.size() * sizeof(float);
-  check_cuda(cudaMemcpy(device_input.get(), input.data(), bytes,
-                        cudaMemcpyHostToDevice),
-             "cudaMemcpy host-to-device");
+  ACQ_CUDA_CHECK(cudaMemcpy(device_input.data(), input.data(), bytes,
+                            cudaMemcpyHostToDevice));
 
-  ops::launch_tanh(device_input.get(), device_output.get(), input.size());
-  check_cuda(cudaGetLastError(), "launch_tanh");
-  check_cuda(cudaDeviceSynchronize(), "cudaDeviceSynchronize");
+  ops::launch_tanh(device_input.data(), device_output.data(), input.size());
+  ACQ_CUDA_CHECK(cudaGetLastError());
+  ACQ_CUDA_CHECK(cudaDeviceSynchronize());
 
   std::vector<float> output(input.size());
-  check_cuda(cudaMemcpy(output.data(), device_output.get(), bytes,
-                        cudaMemcpyDeviceToHost),
-             "cudaMemcpy device-to-host");
+  ACQ_CUDA_CHECK(cudaMemcpy(output.data(), device_output.data(), bytes,
+                            cudaMemcpyDeviceToHost));
   return output;
 }
 

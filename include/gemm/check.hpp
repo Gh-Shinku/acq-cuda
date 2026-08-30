@@ -1,7 +1,7 @@
 #ifndef GEMM_CHECK_HPP
 #define GEMM_CHECK_HPP
 
-#include <cuda_runtime_api.h>
+#include "cuda/check.hpp"
 
 #include <sstream>
 #include <stdexcept>
@@ -15,16 +15,6 @@
 #endif
 
 namespace gemm {
-
-inline void check_cuda(cudaError_t status, const char* expr, const char* file,
-                       int line) {
-  if (status != cudaSuccess) {
-    std::ostringstream oss;
-    oss << "CUDA error at " << file << ":" << line << " while running "
-        << expr << ": " << cudaGetErrorString(status);
-    throw std::runtime_error(oss.str());
-  }
-}
 
 #if defined(GEMM_ENABLE_CUTLASS_CHECK)
 inline void check_cutlass(cutlass::Status status, const char* expr,
@@ -78,7 +68,7 @@ inline void check_cublas(cublasStatus_t status, const char* expr,
 
 }  // namespace gemm
 
-#define GEMM_CUDA_CHECK(expr) ::gemm::check_cuda((expr), #expr, __FILE__, __LINE__)
+#define GEMM_CUDA_CHECK(expr) ACQ_CUDA_CHECK(expr)
 
 #if defined(GEMM_ENABLE_CUTLASS_CHECK)
 #define GEMM_CUTLASS_CHECK(expr) \

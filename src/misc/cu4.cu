@@ -26,5 +26,5 @@ __global__ void blurKernel(uint8_t *in, uint8_t *out, int w, int h,
 
 int main() {
 
-  // CudaMemory<uint8_t> in();
+  // acq::cuda::DeviceBuffer<uint8_t> input(width * height);
 }

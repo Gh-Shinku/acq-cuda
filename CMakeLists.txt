@@ -35,6 +35,7 @@ add_executable(cu3 src/misc/cu3.cu)
 add_executable(gemm_benchmark benchmarks/gemm_benchmark.cu)
 add_executable(gemm_profile tools/profile/gemm_profile.cu)
 add_executable(gemm_correctness_test tests/gemm_correctness_test.cu)
+add_executable(device_buffer_test tests/device_buffer_test.cu)
 add_executable(tanh_correctness_test tests/tanh_correctness_test.cu)
 add_library(acq_cuda_ops STATIC src/tanh.cu)
 add_library(gemm_kernels STATIC
@@ -61,7 +62,7 @@ target_include_directories(cutlass_headers INTERFACE
 )
 
 foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark gemm_profile
-  gemm_correctness_test tanh_correctness_test gemm_kernels acq_cuda_ops)
+  gemm_correctness_test device_buffer_test tanh_correctness_test gemm_kernels acq_cuda_ops)
   target_link_libraries(${target} PRIVATE acq_project_headers)
 endforeach()
 
@@ -83,10 +84,13 @@ target_link_libraries(cu3 PRIVATE gemm_kernels)
 target_link_libraries(gemm_benchmark PRIVATE gemm_kernels)
 target_link_libraries(gemm_profile PRIVATE gemm_kernels)
 target_link_libraries(gemm_correctness_test PRIVATE gemm_kernels)
+target_link_libraries(device_buffer_test PRIVATE Catch2::Catch2WithMain CUDA::cudart)
 target_link_libraries(tanh_correctness_test PRIVATE Catch2::Catch2WithMain acq_cuda_ops)
 
 add_test(NAME gemm_correctness
   COMMAND gemm_correctness_test --quick)
+add_test(NAME device_buffer
+  COMMAND device_buffer_test)
 add_test(NAME tanh_correctness
   COMMAND tanh_correctness_test)
 
