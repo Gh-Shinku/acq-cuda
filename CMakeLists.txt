@@ -35,6 +35,8 @@ add_executable(cu3 src/misc/cu3.cu)
 add_executable(gemm_benchmark benchmarks/gemm_benchmark.cu)
 add_executable(gemm_profile tools/profile/gemm_profile.cu)
 add_executable(gemm_correctness_test tests/gemm_correctness_test.cu)
+add_executable(tanh_correctness_test tests/tanh_correctness_test.cu)
+add_library(acq_cuda_ops STATIC src/tanh.cu)
 add_library(gemm_kernels STATIC
   src/gemm/registry.cu
   src/gemm/sgemm_async_tiling.cu
@@ -58,14 +60,16 @@ target_include_directories(cutlass_headers INTERFACE
   "${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include"
 )
 
-foreach(target matrix_test cu1 cu2 cu3 cut1 cut2 gemm_benchmark gemm_profile
-  gemm_correctness_test gemm_kernels)
+foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark gemm_profile
+  gemm_correctness_test tanh_correctness_test gemm_kernels acq_cuda_ops)
   target_link_libraries(${target} PRIVATE acq_project_headers)
 endforeach()
 
 foreach(target gemm_kernels cut1 cut2)
-  target_link_libraries(${target} PRIVATE cutlass_headers)
-  target_compile_options(${target} PRIVATE --expt-relaxed-constexpr)
+  if(TARGET ${target})
+    target_link_libraries(${target} PRIVATE cutlass_headers)
+    target_compile_options(${target} PRIVATE --expt-relaxed-constexpr)
+  endif()
 endforeach()
 
 if(ACQ_CUDA_LINE_INFO)
@@ -73,14 +77,18 @@ if(ACQ_CUDA_LINE_INFO)
 endif()
 
 target_link_libraries(gemm_kernels PUBLIC CUDA::cublas)
+target_link_libraries(acq_cuda_ops PUBLIC CUDA::cudart)
 
 target_link_libraries(cu3 PRIVATE gemm_kernels)
 target_link_libraries(gemm_benchmark PRIVATE gemm_kernels)
 target_link_libraries(gemm_profile PRIVATE gemm_kernels)
 target_link_libraries(gemm_correctness_test PRIVATE gemm_kernels)
+target_link_libraries(tanh_correctness_test PRIVATE Catch2::Catch2WithMain acq_cuda_ops)
 
 add_test(NAME gemm_correctness
   COMMAND gemm_correctness_test --quick)
+add_test(NAME tanh_correctness
+  COMMAND tanh_correctness_test)
 
 set(CLANGD_COMPILE_COMMANDS_JSON
   "${CMAKE_BINARY_DIR}/compile_commands.clangd.json")
