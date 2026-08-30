@@ -32,7 +32,6 @@ target_link_libraries(matrix_test PRIVATE Catch2::Catch2WithMain)
 add_executable(cu1 src/misc/cu1.cu)
 add_executable(cu2 src/misc/cu2.cu)
 add_executable(cu3 src/misc/cu3.cu)
-add_executable(cut1 src/cutlass/cut1.cu)
 add_executable(gemm_benchmark benchmarks/gemm_benchmark.cu)
 add_executable(gemm_profile tools/profile/gemm_profile.cu)
 add_executable(gemm_correctness_test tests/gemm_correctness_test.cu)
@@ -59,12 +58,12 @@ target_include_directories(cutlass_headers INTERFACE
   "${CMAKE_SOURCE_DIR}/third_party/cutlass/tools/util/include"
 )
 
-foreach(target matrix_test cu1 cu2 cu3 cut1 gemm_benchmark gemm_profile
+foreach(target matrix_test cu1 cu2 cu3 cut1 cut2 gemm_benchmark gemm_profile
   gemm_correctness_test gemm_kernels)
   target_link_libraries(${target} PRIVATE acq_project_headers)
 endforeach()
 
-foreach(target gemm_kernels cut1)
+foreach(target gemm_kernels cut1 cut2)
   target_link_libraries(${target} PRIVATE cutlass_headers)
   target_compile_options(${target} PRIVATE --expt-relaxed-constexpr)
 endforeach()
