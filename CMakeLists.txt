@@ -33,6 +33,7 @@ add_executable(cu1 src/misc/cu1.cu)
 add_executable(cu2 src/misc/cu2.cu)
 add_executable(cu3 src/misc/cu3.cu)
 add_executable(gemm_benchmark benchmarks/gemm_benchmark.cu)
+add_executable(hgemm_benchmark benchmarks/hgemm_benchmark.cu)
 add_executable(gemm_profile tools/profile/gemm_profile.cu)
 add_executable(gemm_correctness_test tests/gemm_correctness_test.cu)
 add_executable(device_buffer_test tests/device_buffer_test.cu)
@@ -49,6 +50,11 @@ add_library(gemm_kernels STATIC
   src/gemm/sgemm_wmma_tf32.cu
   src/gemm/sgemm_warp_tiling.cu
 )
+add_library(hgemm_fp16_4096_kernels STATIC
+  src/gemm/hgemm_fp16_4096_cublas.cu
+  src/gemm/hgemm_fp16_4096_custom.cu
+  src/gemm/hgemm_fp16_4096_registry.cu
+)
 
 add_library(acq_project_headers INTERFACE)
 target_include_directories(acq_project_headers INTERFACE
@@ -62,7 +68,8 @@ target_include_directories(cutlass_headers INTERFACE
 )
 
 foreach(target matrix_test cu1 cu2 cu3 gemm_benchmark gemm_profile
-  gemm_correctness_test device_buffer_test tanh_correctness_test gemm_kernels acq_cuda_ops)
+  hgemm_benchmark gemm_correctness_test device_buffer_test tanh_correctness_test
+  gemm_kernels hgemm_fp16_4096_kernels acq_cuda_ops)
   target_link_libraries(${target} PRIVATE acq_project_headers)
 endforeach()
 
@@ -75,13 +82,19 @@ endforeach()
 
 if(ACQ_CUDA_LINE_INFO)
   target_compile_options(gemm_kernels PRIVATE --generate-line-info)
+  target_compile_options(hgemm_fp16_4096_kernels PRIVATE --generate-line-info)
 endif()
 
 target_link_libraries(gemm_kernels PUBLIC CUDA::cublas)
+target_link_libraries(hgemm_fp16_4096_kernels PUBLIC CUDA::cublas)
 target_link_libraries(acq_cuda_ops PUBLIC CUDA::cudart)
+
+# This target intentionally targets the fixed RTX 5090/Blackwell workload.
+set_target_properties(hgemm_fp16_4096_kernels PROPERTIES CUDA_ARCHITECTURES 120)
 
 target_link_libraries(cu3 PRIVATE gemm_kernels)
 target_link_libraries(gemm_benchmark PRIVATE gemm_kernels)
+target_link_libraries(hgemm_benchmark PRIVATE hgemm_fp16_4096_kernels)
 target_link_libraries(gemm_profile PRIVATE gemm_kernels)
 target_link_libraries(gemm_correctness_test PRIVATE gemm_kernels)
 target_link_libraries(device_buffer_test PRIVATE Catch2::Catch2WithMain CUDA::cudart)
