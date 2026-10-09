@@ -1,0 +1,3 @@
+gpu,compute_capability,impl,M,N,K,fp16_inputs,fp16_output,fp32_accumulation,median_ms,min_ms,max_ms,median_tflops,speedup_vs_cublas,valid,max_abs_error,max_rel_error
+"NVIDIA GeForce RTX 5090",12.0,"cuBLAS GemmEx FP16",4096,4096,4096,true,true,true,0.660523,0.633741,0.665296,208.075899,1.000000,true,0.000000,0.000000
+"NVIDIA GeForce RTX 5090",12.0,"Custom FP16 StreamK",4096,4096,4096,true,true,true,0.651091,0.621322,0.655379,211.090166,1.014486,true,0.062500,0.000977

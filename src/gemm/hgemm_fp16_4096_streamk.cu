@@ -13,7 +13,7 @@
 // 0.604 ms for 992 blocks, a 13% cliff).
 //
 // Stream-K decouples the work from the output tiling: the (output tile,
-// k-slice) space is flattened into 1024*128 = 131072 units and split evenly
+// k-slice) space is flattened into 1024*64 = 65536 units and split evenly
 // across a fixed number of resident blocks. Every block therefore does the
 // same amount of work and the tail disappears.
 //
@@ -33,7 +33,7 @@ constexpr int K = 4096;
 
 constexpr int BM = 128;
 constexpr int BN = 128;
-constexpr int BK = 32;
+constexpr int BK = 64;
 
 constexpr int NUM_THREADS = 512;
 constexpr int WARPS_M = 4;
@@ -43,8 +43,10 @@ constexpr int WARP_N = BN / WARPS_N;
 constexpr int MT = WARP_M / 16;
 constexpr int NT = WARP_N / 8;
 
-constexpr int A_STRIDE = BK + 8;
-constexpr int B_STRIDE = BN + 8;
+// A 16-half row skew keeps ldmatrix rows aligned and changes the shared-memory
+// bank pattern. It also gave the best measured throughput for this tile shape.
+constexpr int A_STRIDE = BK + 16;
+constexpr int B_STRIDE = BN + 16;
 
 constexpr int CHUNKS_PER_ROW_A = BK / 8;
 constexpr int CHUNKS_PER_ROW_B = BN / 8;

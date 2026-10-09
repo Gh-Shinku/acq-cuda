@@ -16,6 +16,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace {
@@ -34,6 +35,7 @@ struct Options {
   std::vector<std::string> impl_keys;
   std::string csv_path = "benchmark_results/hgemm_fp16_4096.csv";
   bool validate = true;
+  bool paired = false;
 };
 
 struct Validation {
@@ -117,11 +119,12 @@ void print_usage(const char* program) {
   std::cout
       << "Usage: " << program
       << " [--device ID] [--warmup N] [--samples N]"
-         " [--launches-per-sample N] [--impl cublas,custom] [--csv PATH]"
-         " [--no-validate]\n\n"
+         " [--launches-per-sample N] [--impl cublas,custom,streamk]"
+         " [--csv PATH] [--no-validate] [--paired]\n\n"
          "Fixed workload: row-major D=A*B, M=N=K=4096; FP16 A/B/D; FP32 "
          "accumulation.\n"
-         "Defaults: 50 warmups, 30 samples, 10 launches per sample.\n";
+         "Defaults: 50 warmups, 30 samples, 10 launches per sample.\n"
+         "--paired alternates cuBLAS and one custom kernel each sample.\n";
 }
 
 Options parse_args(int argc, char** argv) {
@@ -145,12 +148,14 @@ Options parse_args(int argc, char** argv) {
     } else if (arg == "--impl") {
       options.impl_keys = split_csv(value(arg));
       if (options.impl_keys.empty()) {
-        throw std::invalid_argument("--impl must select cublas and/or custom");
+        throw std::invalid_argument("--impl must select an implementation");
       }
     } else if (arg == "--csv") {
       options.csv_path = value(arg);
     } else if (arg == "--no-validate") {
       options.validate = false;
+    } else if (arg == "--paired") {
+      options.paired = true;
     } else if (arg == "--help") {
       print_usage(argv[0]);
       std::exit(0);
@@ -162,12 +167,14 @@ Options parse_args(int argc, char** argv) {
 }
 
 const char* implementation_key(const Implementation& implementation) {
-  return implementation.is_baseline ? "cublas" : "custom";
+  if (implementation.is_baseline) return "cublas";
+  if (implementation.launcher == gemm::fp16_4096::launch_streamk) return "streamk";
+  return "custom";
 }
 
 std::vector<Implementation> select_implementations(const Options& options) {
   for (const std::string& key : options.impl_keys) {
-    if (key != "cublas" && key != "custom") {
+    if (key != "cublas" && key != "custom" && key != "streamk") {
       throw std::invalid_argument("unknown implementation key: " + key);
     }
   }
@@ -175,12 +182,15 @@ std::vector<Implementation> select_implementations(const Options& options) {
   for (const Implementation& implementation : gemm::fp16_4096::implementations()) {
     if (options.impl_keys.empty() ||
         std::find(options.impl_keys.begin(), options.impl_keys.end(),
-                  implementation_key(implementation)) != options.impl_keys.end()) {
+                  implementation_key(implementation)) != options.impl_keys.end() ||
+        (!implementation.is_baseline &&
+         std::find(options.impl_keys.begin(), options.impl_keys.end(), "custom") !=
+             options.impl_keys.end())) {
       selected.push_back(implementation);
     }
   }
   if (selected.empty()) {
-    throw std::invalid_argument("--impl must select cublas and/or custom");
+    throw std::invalid_argument("--impl must select at least one implementation");
   }
   const auto baseline = std::find_if(selected.begin(), selected.end(),
                                      [](const Implementation& value) {
@@ -247,6 +257,21 @@ double tflops(float milliseconds) {
   return operations / (static_cast<double>(milliseconds) / 1000.0) / 1.0e12;
 }
 
+Metrics summarize_timings(const Implementation& implementation,
+                          std::vector<float> timings) {
+  std::sort(timings.begin(), timings.end());
+  Metrics metrics;
+  metrics.impl = implementation.name;
+  metrics.min_ms = timings.front();
+  metrics.max_ms = timings.back();
+  const size_t middle = timings.size() / 2;
+  metrics.median_ms = timings.size() % 2 == 0
+                          ? (timings[middle - 1] + timings[middle]) / 2.0f
+                          : timings[middle];
+  metrics.median_tflops = tflops(metrics.median_ms);
+  return metrics;
+}
+
 Metrics run_implementation(const Implementation& implementation,
                            const Options& options, const __half* a,
                            const __half* b, __half* d,
@@ -263,17 +288,7 @@ Metrics run_implementation(const Implementation& implementation,
         [&] { implementation.launcher(a, b, d, nullptr); },
         options.launches_per_sample));
   }
-  std::sort(timings.begin(), timings.end());
-
-  Metrics metrics;
-  metrics.impl = implementation.name;
-  metrics.min_ms = timings.front();
-  metrics.max_ms = timings.back();
-  const size_t middle = timings.size() / 2;
-  metrics.median_ms = timings.size() % 2 == 0
-                          ? (timings[middle - 1] + timings[middle]) / 2.0f
-                          : timings[middle];
-  metrics.median_tflops = tflops(metrics.median_ms);
+  Metrics metrics = summarize_timings(implementation, std::move(timings));
 
   if (baseline != nullptr && options.validate) {
     std::vector<__half> output(baseline->size());
@@ -354,6 +369,62 @@ int main(int argc, char** argv) {
               << " FP16->FP16, FP32 accumulate\n";
     write_header(std::cout);
     write_header(csv);
+
+    if (options.paired) {
+      if (implementations.size() != 2 || !implementations.front().is_baseline) {
+        throw std::invalid_argument(
+            "--paired requires exactly cublas and one custom implementation");
+      }
+      for (int i = 0; i < options.warmup; ++i) {
+        for (const Implementation& implementation : implementations) {
+          implementation.launcher(dev_a.data(), dev_b.data(), dev_d.data(), nullptr);
+        }
+      }
+      GEMM_CUDA_CHECK(cudaDeviceSynchronize());
+      std::vector<float> baseline_times;
+      std::vector<float> custom_times;
+      baseline_times.reserve(options.samples);
+      custom_times.reserve(options.samples);
+      auto sample = [&](const Implementation& implementation) {
+        return time_sample(
+            [&] { implementation.launcher(dev_a.data(), dev_b.data(),
+                                           dev_d.data(), nullptr); },
+            options.launches_per_sample);
+      };
+      for (int i = 0; i < options.samples; ++i) {
+        if (i % 2 == 0) {
+          baseline_times.push_back(sample(implementations[0]));
+          custom_times.push_back(sample(implementations[1]));
+        } else {
+          custom_times.push_back(sample(implementations[1]));
+          baseline_times.push_back(sample(implementations[0]));
+        }
+      }
+      Metrics baseline_metrics =
+          summarize_timings(implementations[0], std::move(baseline_times));
+      Metrics custom_metrics =
+          summarize_timings(implementations[1], std::move(custom_times));
+      custom_metrics.speedup_vs_cublas =
+          baseline_metrics.median_ms / custom_metrics.median_ms;
+      if (options.validate) {
+        std::vector<__half> reference(elements);
+        std::vector<__half> output(elements);
+        implementations[0].launcher(dev_a.data(), dev_b.data(), dev_d.data(),
+                                    nullptr);
+        GEMM_CUDA_CHECK(cudaMemcpy(reference.data(), dev_d.data(), dev_d.bytes(),
+                                   cudaMemcpyDeviceToHost));
+        implementations[1].launcher(dev_a.data(), dev_b.data(), dev_d.data(),
+                                    nullptr);
+        GEMM_CUDA_CHECK(cudaMemcpy(output.data(), dev_d.data(), dev_d.bytes(),
+                                   cudaMemcpyDeviceToHost));
+        custom_metrics.validation = compare_results(reference, output);
+      }
+      write_metrics(std::cout, device, baseline_metrics);
+      write_metrics(std::cout, device, custom_metrics);
+      write_metrics(csv, device, baseline_metrics);
+      write_metrics(csv, device, custom_metrics);
+      return custom_metrics.validation.passed ? 0 : 2;
+    }
 
     std::vector<__half> baseline;
     float baseline_ms = 0.0f;
