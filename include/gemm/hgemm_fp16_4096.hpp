@@ -34,6 +34,10 @@ void launch_custom(const __half* a, const __half* b, __half* d,
 void launch_wmma(const __half* a, const __half* b, __half* d,
                  cudaStream_t stream);
 
+// Hand-written mma.sync + ldmatrix variant of the same workload.
+void launch_mma(const __half* a, const __half* b, __half* d,
+                cudaStream_t stream);
+
 const std::vector<Implementation>& implementations();
 
 }  // namespace gemm::fp16_4096
