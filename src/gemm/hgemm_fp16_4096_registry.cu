@@ -8,6 +8,7 @@ const std::vector<Implementation>& implementations() {
       {"Custom FP16", launch_custom, false},
       {"Custom FP16 WMMA", launch_wmma, false},
       {"Custom FP16 MMA", launch_mma, false},
+      {"Custom FP16 StreamK", launch_streamk, false},
   };
   return values;
 }

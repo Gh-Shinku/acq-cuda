@@ -38,6 +38,10 @@ void launch_wmma(const __half* a, const __half* b, __half* d,
 void launch_mma(const __half* a, const __half* b, __half* d,
                 cudaStream_t stream);
 
+// mma.sync variant with stream-K scheduling to remove the partial-wave tail.
+void launch_streamk(const __half* a, const __half* b, __half* d,
+                    cudaStream_t stream);
+
 const std::vector<Implementation>& implementations();
 
 }  // namespace gemm::fp16_4096

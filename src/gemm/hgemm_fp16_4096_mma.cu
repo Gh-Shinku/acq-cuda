@@ -39,6 +39,11 @@ constexpr int K = 4096;
 #ifndef GEMM_MMA_GRID_M
 #define GEMM_MMA_GRID_M M
 #endif
+// Diagnostic knob: pad the dynamic shared-memory request to change the
+// resident-blocks-per-SM (and therefore the wave quantisation).
+#ifndef GEMM_MMA_SMEM_PAD
+#define GEMM_MMA_SMEM_PAD 0
+#endif
 
 
 constexpr int BM = GEMM_MMA_BM;
@@ -266,15 +271,17 @@ __global__ void mma_hgemm(const __half* __restrict__ a,
 
 void launch_mma(const __half* a, const __half* b, __half* d,
                 cudaStream_t stream) {
+  constexpr int LAUNCH_SMEM =
+      SMEM_BYTES > GEMM_MMA_SMEM_PAD ? SMEM_BYTES : GEMM_MMA_SMEM_PAD;
   static bool configured = false;
   if (!configured) {
     GEMM_CUDA_CHECK(cudaFuncSetAttribute(
-        mma_hgemm, cudaFuncAttributeMaxDynamicSharedMemorySize, SMEM_BYTES));
+        mma_hgemm, cudaFuncAttributeMaxDynamicSharedMemorySize, LAUNCH_SMEM));
     configured = true;
   }
   dim3 block {NUM_THREADS};
   dim3 grid {N / BN, GEMM_MMA_GRID_M / BM};
-  mma_hgemm<<<grid, block, SMEM_BYTES, stream>>>(a, b, d);
+  mma_hgemm<<<grid, block, LAUNCH_SMEM, stream>>>(a, b, d);
   GEMM_CUDA_CHECK(cudaGetLastError());
 }
 
