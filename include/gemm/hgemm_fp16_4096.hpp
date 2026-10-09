@@ -30,6 +30,10 @@ void launch_cublas(const __half* a, const __half* b, __half* d,
 void launch_custom(const __half* a, const __half* b, __half* d,
                    cudaStream_t stream);
 
+// Hand-written tensor-core (nvcuda::wmma) variant of the same workload.
+void launch_wmma(const __half* a, const __half* b, __half* d,
+                 cudaStream_t stream);
+
 const std::vector<Implementation>& implementations();
 
 }  // namespace gemm::fp16_4096

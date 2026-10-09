@@ -6,6 +6,7 @@ const std::vector<Implementation>& implementations() {
   static const std::vector<Implementation> values = {
       {"cuBLAS GemmEx FP16", launch_cublas, true},
       {"Custom FP16", launch_custom, false},
+      {"Custom FP16 WMMA", launch_wmma, false},
   };
   return values;
 }

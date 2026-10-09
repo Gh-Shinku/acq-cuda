@@ -3,6 +3,7 @@
 
 #include <cuda_fp16.h>
 #include <cuda/pipeline>
+#include <mma.h>
 
 namespace gemm::fp16_4096 {
 namespace {

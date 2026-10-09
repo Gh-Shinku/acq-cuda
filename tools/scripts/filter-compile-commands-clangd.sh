@@ -46,11 +46,44 @@ find "$source_dir/include" -type f \( -name '*.h' -o -name '*.hpp' \) -print0 |
   ' > "$headers_json"
 
 jq --arg cuda_include_dirs "$cuda_include_dirs" '
-  def drop_generate_code:
+  # nvcc spells the target GPU as --generate-code=arch=compute_120,code=[...],
+  # which clang/clangd do not understand. Drop it and re-emit the equivalent
+  # clang driver flag --cuda-gpu-arch=sm_120 so that .cu files are parsed for
+  # the same architecture the real build uses (otherwise clangd falls back to
+  # sm_52, where e.g. <crt/mma.hpp> never declares nvcuda::wmma).
+  def gencode_archs:
     if type == "array" then
-      map(select((type == "string" and startswith("--generate-code=arch")) | not))
+      map(select(type == "string")) | join(" ")
     elif type == "string" then
-      gsub("(^|[[:space:]])\"?--generate-code=arch=[^\"[:space:]]+\"?"; "")
+      .
+    else
+      ""
+    end;
+
+  # Highest arch wins, matching the ascending CUDA_ARCHITECTURES order.
+  def last_gencode_arch:
+    [gencode_archs
+     | match("arch=compute_([0-9]+[a-z]?)"; "g")
+     | .captures[0].string] | last;
+
+  def translate_generate_code:
+    if type == "array" then
+      . as $arguments
+      | ($arguments | last_gencode_arch) as $arch
+      | ($arguments
+         | map(select(
+             if type == "string" then
+               (test("^(--generate-code|-gencode)=arch") | not)
+             else
+               true
+             end)))
+        + (if $arch then ["--cuda-gpu-arch=sm_" + $arch] else [] end)
+    elif type == "string" then
+      . as $command
+      | ($command | last_gencode_arch) as $arch
+      | ($command
+         | gsub("(^|[[:space:]])\"?(--generate-code|-gencode)=arch[^\"[:space:]]+\"?"; " "))
+      | if $arch then . + " --cuda-gpu-arch=sm_" + $arch else . end
     else
       .
     end;
@@ -80,8 +113,8 @@ jq --arg cuda_include_dirs "$cuda_include_dirs" '
     end;
 
   map(
-    if has("arguments") then .arguments |= drop_generate_code | .arguments |= drop_clangd_unsupported_nvcc_flags else . end
-    | if has("command") then .command |= drop_generate_code | .command |= drop_clangd_unsupported_nvcc_flags else . end
+    if has("arguments") then .arguments |= translate_generate_code | .arguments |= drop_clangd_unsupported_nvcc_flags else . end
+    | if has("command") then .command |= translate_generate_code | .command |= drop_clangd_unsupported_nvcc_flags else . end
     | if is_cuda_command and has("arguments") then .arguments += cuda_isystem_args else . end
     | if is_cuda_command and has("command") then .command += cuda_isystem_command else . end
   )

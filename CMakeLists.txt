@@ -53,6 +53,7 @@ add_library(gemm_kernels STATIC
 add_library(hgemm_fp16_4096_kernels STATIC
   src/gemm/hgemm_fp16_4096_cublas.cu
   src/gemm/hgemm_fp16_4096_custom.cu
+  src/gemm/hgemm_fp16_4096_wmma.cu
   src/gemm/hgemm_fp16_4096_registry.cu
 )
 
